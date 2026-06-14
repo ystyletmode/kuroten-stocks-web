@@ -1,6 +1,12 @@
 {
   "scanMode": "recentDisclosures",
-  "codeList": ["6758", "7203", "9984", "4385", "3038"],
+  "codeList": [
+    "6758",
+    "7203",
+    "9984",
+    "4385",
+    "3038"
+  ],
   "minScore": 60,
   "market": null,
   "fiscalMonth": null,
