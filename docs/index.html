@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>黒字転換2倍株ファインダー（馬渕メソッド）</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+<header>
+  <div class="title">
+    <h1>黒字転換2倍株ファインダー</h1>
+    <span class="sub">馬渕メソッド / 四半期の営業利益・経常利益の赤字→黒字転換を採点</span>
+  </div>
+  <div class="meta">
+    <label>調査:
+      <select id="historySelect"></select>
+    </label>
+    <div id="summary" class="summary"></div>
+  </div>
+</header>
+
+<main>
+  <section id="listPane" class="pane">
+    <div id="rankingList" class="list"></div>
+    <div id="emptyState" class="empty" hidden>条件に該当する銘柄がありません。</div>
+  </section>
+  <section id="detailPane" class="pane detail">
+    <div id="detailEmpty" class="empty">銘柄を選択してください</div>
+    <div id="detail" hidden></div>
+  </section>
+</main>
+
+<footer>
+  ※ 本サイトは馬渕磨理子『黒字転換2倍株で勝つ投資術』の選定手法を学習・確認するための補助ツールです。
+  表示はメソッド適合度であり、将来の株価・利益を保証しません。投資判断はご自身の責任で行ってください。
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
