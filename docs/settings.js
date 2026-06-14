@@ -125,10 +125,6 @@
     localStorage.setItem('gh.pat', g('cfgPat').value.trim());
   }
 
-  // --- Base64 ヘルパー ---
-  function b64encode(str) { return btoa(unescape(encodeURIComponent(str))); }
-  function b64decode(str) { return decodeURIComponent(escape(atob(str))); }
-
   // --- 自動実行(cron)の読み書き。JST = UTC + 9 ---
   function cronSetStatus(msg, ok) {
     const el = g('cronStatus');
