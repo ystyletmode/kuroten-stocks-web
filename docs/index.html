@@ -15,12 +15,78 @@
     <span class="sub">馬渕メソッド / 四半期の営業利益・経常利益の赤字→黒字転換を採点</span>
   </div>
   <div class="meta">
-    <label>調査:
-      <select id="historySelect"></select>
-    </label>
+    <div class="metarow">
+      <label>調査: <select id="historySelect"></select></label>
+      <button id="settingsToggle" class="btn">設定</button>
+    </div>
     <div id="summary" class="summary"></div>
   </div>
 </header>
+
+<section id="settingsPanel" class="settings" hidden>
+  <div class="settings-inner">
+    <h3>設定(この画面から変更・実行)</h3>
+
+    <div class="grp">
+      <div class="grp-title">GitHub接続</div>
+      <div class="frow"><label>リポジトリ(owner/repo)</label>
+        <input id="cfgRepo" placeholder="owner/repo"></div>
+      <div class="frow"><label>個人アクセストークン</label>
+        <input id="cfgPat" type="password" placeholder="ghp_... または github_pat_..."></div>
+      <div class="hint">設定の保存・実行に必要です。Fine-grained PATで対象リポジトリの「Contents: Read and write」「Actions: Read and write」を許可してください。トークンはこのブラウザ内にのみ保存されます。
+        <a href="https://github.com/settings/tokens?type=beta" target="_blank">トークンを発行</a></div>
+      <div class="frow"><button id="btnLoad" class="btn">現在の設定を読み込み</button></div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-title">候補銘柄の集め方</div>
+      <div class="frow"><label>方式</label>
+        <select id="cfgScanMode"><option value="codeList">銘柄コードリスト</option><option value="recentDisclosures">直近決算スキャン</option></select></div>
+      <div class="frow" id="rowCodeList"><label>銘柄コード(カンマ/改行)</label>
+        <textarea id="cfgCodeList" rows="2" placeholder="6758, 7203, 9984"></textarea></div>
+      <div class="frow"><label>直近スキャン日数 / 候補上限</label>
+        <span><input id="cfgLookback" type="number" style="width:80px"> 日 / <input id="cfgMaxCand" type="number" style="width:80px"> 件</span></div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-title">投資予算</div>
+      <div class="frow"><label><input id="cfgBudgetOn" type="checkbox"> 予算で絞り込む</label>
+        <span><input id="cfgBudget" type="number" style="width:120px"> 円</span></div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-title">絞り込み条件</div>
+      <div class="frow"><label>市場</label>
+        <select id="cfgMarket"><option value="">全市場</option><option>プライム</option><option>スタンダード</option><option>グロース</option></select></div>
+      <div class="frow"><label>決算月</label>
+        <select id="cfgFiscal"><option value="">全期</option></select></div>
+      <div class="frow"><label>テーマ/業種キーワード</label><input id="cfgTheme"></div>
+      <div class="frow"><label>最低スコア</label><input id="cfgMinScore" type="number" style="width:80px"></div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-title">データ/プラン</div>
+      <div class="frow"><label>プラン(req/分)</label>
+        <select id="cfgRpm"><option value="5">Free(5)</option><option value="60">Light(60)</option><option value="120">Standard(120)</option><option value="500">Premium(500)</option></select></div>
+      <div class="frow"><label>データ遅延(日)</label><input id="cfgDelay" type="number" style="width:80px"></div>
+    </div>
+
+    <div class="grp">
+      <div class="grp-title">メール通知</div>
+      <div class="frow"><label><input id="cfgEmailOn" type="checkbox"> 実行後に結果をメール送信</label></div>
+      <div class="frow"><label>送付元</label><input id="cfgEmailFrom" placeholder="Secretsに入れた場合は空でOK"></div>
+      <div class="frow"><label>送付先</label><input id="cfgEmailTo"></div>
+      <div class="hint">アプリパスワードは config に保存できません。GitHubの Secrets(MAIL_APP_PASSWORD)に登録してください。</div>
+    </div>
+
+    <div class="actions">
+      <button id="btnSave" class="btn primary">設定を保存</button>
+      <button id="btnSaveRun" class="btn primary">保存して今すぐ実行</button>
+      <button id="btnRun" class="btn">今すぐ実行(保存済み設定)</button>
+      <span id="cfgStatus" class="cfgstatus"></span>
+    </div>
+  </div>
+</section>
 
 <main>
   <section id="listPane" class="pane">
@@ -39,5 +105,6 @@
 </footer>
 
 <script src="app.js"></script>
+<script src="settings.js"></script>
 </body>
 </html>
