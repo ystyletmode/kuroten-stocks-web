@@ -1,18 +1,18 @@
 {
-  "scanMode": "codeList",
+  "scanMode": "recentDisclosures",
   "codeList": ["6758", "7203", "9984", "4385", "3038"],
-  "minScore": 40,
+  "minScore": 60,
   "market": null,
   "fiscalMonth": null,
   "themeKeyword": "",
-  "budgetYen": 100000,
+  "budgetYen": 200000,
   "applyBudgetFilter": false,
   "requestsPerMinute": 5,
   "dataDelayDays": 90,
   "lookbackDays": 60,
   "maxCandidates": 50,
   "email": {
-    "enabled": false,
+    "enabled": true,
     "from": "ystyletmode@gmail.com",
     "to": "tmnr4@icloud.com"
   }
