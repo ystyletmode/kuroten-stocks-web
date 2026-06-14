@@ -3,7 +3,9 @@
 (function () {
   const g = (id) => document.getElementById(id);
   const WORKFLOW_FILE = 'screening.yml';
+  const WORKFLOW_PATH = '.github/workflows/screening.yml';
   let configSha = null;
+  let workflowSha = null;
 
   // --- リポジトリ自動判定(<owner>.github.io/<repo>/ から) ---
   function detectRepo() {
@@ -123,6 +125,66 @@
     localStorage.setItem('gh.pat', g('cfgPat').value.trim());
   }
 
+  // --- Base64 ヘルパー ---
+  function b64encode(str) { return btoa(unescape(encodeURIComponent(str))); }
+  function b64decode(str) { return decodeURIComponent(escape(atob(str))); }
+
+  // --- 自動実行(cron)の読み書き。JST = UTC + 9 ---
+  function cronSetStatus(msg, ok) {
+    const el = g('cronStatus');
+    el.textContent = msg;
+    el.className = 'cfgstatus ' + (ok === true ? 'ok' : ok === false ? 'err' : '');
+  }
+  function fillTimeOptions() {
+    const h = g('cfgAutoHour'), m = g('cfgAutoMin');
+    for (let i = 0; i < 24; i++) { const o = document.createElement('option'); o.value = i; o.textContent = String(i).padStart(2, '0'); h.appendChild(o); }
+    for (let i = 0; i < 60; i++) { const o = document.createElement('option'); o.value = i; o.textContent = String(i).padStart(2, '0'); m.appendChild(o); }
+  }
+  async function loadCron() {
+    try {
+      cronSetStatus('読み込み中…');
+      const res = await fetch(`https://api.github.com/repos/${repoPath()}/contents/${WORKFLOW_PATH}`, { headers: ghHeaders() });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const j = await res.json();
+      workflowSha = j.sha;
+      const text = b64decode(j.content);
+      const mm = text.match(/cron:\s*['"]([^'"]+)['"]/);
+      if (mm) {
+        const parts = mm[1].trim().split(/\s+/);   // m h dom mon dow
+        const utcMin = parseInt(parts[0], 10) || 0;
+        const utcHour = parseInt(parts[1], 10) || 0;
+        g('cfgAutoMin').value = utcMin;
+        g('cfgAutoHour').value = (utcHour + 9) % 24;   // UTC→JST
+      }
+      cronSetStatus('現在の実行時刻を読み込みました', true);
+    } catch (e) { cronSetStatus('読み込み失敗: ' + e.message + '(トークン/権限を確認)', false); }
+  }
+  async function saveCron() {
+    try {
+      cronSetStatus('保存中…');
+      if (workflowSha === null) await loadCron();
+      const res0 = await fetch(`https://api.github.com/repos/${repoPath()}/contents/${WORKFLOW_PATH}`, { headers: ghHeaders() });
+      if (!res0.ok) throw new Error('HTTP ' + res0.status);
+      const j0 = await res0.json();
+      workflowSha = j0.sha;
+      let text = b64decode(j0.content);
+      const jstHour = parseInt(g('cfgAutoHour').value, 10);
+      const jstMin = parseInt(g('cfgAutoMin').value, 10);
+      const utcHour = (jstHour - 9 + 24) % 24;
+      const newCron = `${jstMin} ${utcHour} * * *`;
+      if (!/cron:\s*['"][^'"]+['"]/.test(text)) throw new Error('cron行が見つかりません');
+      text = text.replace(/cron:\s*['"][^'"]+['"]/, `cron: '${newCron}'`);
+      const put = await fetch(`https://api.github.com/repos/${repoPath()}/contents/${WORKFLOW_PATH}`, {
+        method: 'PUT', headers: ghHeaders(),
+        body: JSON.stringify({ message: '実行時刻を更新(Webから)', content: b64encode(text), sha: workflowSha, branch: 'main' }),
+      });
+      if (!put.ok) throw new Error('保存失敗 HTTP ' + put.status + '(Workflows権限を確認)');
+      const pj = await put.json();
+      workflowSha = pj.content.sha;
+      cronSetStatus(`実行時刻を ${String(jstHour).padStart(2, '0')}:${String(jstMin).padStart(2, '0')} JST に保存しました`, true);
+    } catch (e) { cronSetStatus(e.message, false); }
+  }
+
   // --- イベント ---
   function init() {
     fillFiscalOptions();
@@ -148,6 +210,9 @@
         setStatus('スクリーニングを起動しました(数分後に再読み込み)', true); }
       catch (e) { setStatus(e.message, false); }
     };
+    fillTimeOptions();
+    g('btnLoadCron').onclick = loadCron;
+    g('btnSaveCron').onclick = saveCron;
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
