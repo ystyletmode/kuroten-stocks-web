@@ -13,10 +13,10 @@
   "themeKeyword": "",
   "budgetYen": 200000,
   "applyBudgetFilter": false,
-  "requestsPerMinute": 5,
+  "requestsPerMinute": 60,
   "dataDelayDays": 90,
   "lookbackDays": 60,
-  "maxCandidates": 500,
+  "maxCandidates": 60,
   "email": {
     "enabled": true,
     "from": "ystyletmode@gmail.com",
