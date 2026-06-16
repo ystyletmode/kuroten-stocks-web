@@ -181,6 +181,102 @@
     } catch (e) { cronSetStatus(e.message, false); }
   }
 
+  // --- 実行の進捗表示(GitHub Actions を追跡) ---
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  let progEl = null, progFill = null, progText = null, progStart = 0;
+  function ensureProgress() {
+    if (progEl) return;
+    if (!document.getElementById('runprogCss')) {
+      const st = document.createElement('style'); st.id = 'runprogCss';
+      st.textContent =
+        '.runprog{flex:1 0 100%;margin-top:12px}' +
+        '.runprog-track{height:10px;border-radius:6px;background:#e7eaee;overflow:hidden}' +
+        '.runprog-fill{height:100%;width:0;border-radius:6px;background:var(--teal,#2bb3a3);transition:width .6s ease}' +
+        '.runprog-fill.done{background:var(--green,#2aa84a)}' +
+        '.runprog-fill.err{background:var(--red,#d23b2e)}' +
+        '.runprog-text{margin-top:6px;font-size:12px;color:var(--muted,#6b7480)}';
+      document.head.appendChild(st);
+    }
+    const host = g('btnSaveRun').closest('.actions') || g('btnSaveRun').parentElement;
+    progEl = document.createElement('div'); progEl.className = 'runprog'; progEl.hidden = true;
+    progEl.innerHTML = '<div class="runprog-track"><div class="runprog-fill"></div></div><div class="runprog-text"></div>';
+    host.appendChild(progEl);
+    progFill = progEl.querySelector('.runprog-fill');
+    progText = progEl.querySelector('.runprog-text');
+  }
+  function progShow(pct, text, state) {
+    ensureProgress();
+    progEl.hidden = false;
+    progFill.className = 'runprog-fill' + (state ? ' ' + state : '');
+    if (pct != null) progFill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    if (text != null) progText.textContent = text;
+  }
+  const secs = () => Math.round((Date.now() - progStart) / 1000);
+  async function ghJSON(url) {
+    const r = await fetch(url, { headers: ghHeaders() });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }
+  async function currentDataDate() {
+    try { const r = await fetch('data/latest.json?t=' + Date.now(), { cache: 'no-store' }); if (r.ok) { const j = await r.json(); return j.date || null; } } catch (e) {}
+    return null;
+  }
+  async function waitForNewData(prevDate) {
+    for (let i = 0; i < 30; i++) {
+      try {
+        const r = await fetch('data/latest.json?t=' + Date.now(), { cache: 'no-store' });
+        if (r.ok) { const j = await r.json(); if (!prevDate || j.date !== prevDate) return true; }
+      } catch (e) {}
+      await sleep(5000);
+    }
+    return false;
+  }
+  async function findRun(dispatchTime) {
+    for (let i = 0; i < 15; i++) {
+      try {
+        const j = await ghJSON(`https://api.github.com/repos/${repoPath()}/actions/workflows/${WORKFLOW_FILE}/runs?event=workflow_dispatch&per_page=5`);
+        const runs = (j.workflow_runs || []).filter(r => new Date(r.created_at).getTime() >= dispatchTime - 60000);
+        if (runs.length) { runs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)); return runs[0]; }
+      } catch (e) {}
+      progShow(6 + i, `起動を確認中… (${secs()}秒)`);
+      await sleep(4000);
+    }
+    return null;
+  }
+  async function trackRun(dispatchTime, prevDate) {
+    ensureProgress();
+    progStart = Date.now();
+    progShow(5, '起動しました。実行を追跡します…');
+    const run = await findRun(dispatchTime);
+    if (!run) {
+      progShow(40, `実行中… 完了後に自動で反映します (${secs()}秒)`);
+      const ok = await waitForNewData(prevDate);
+      if (ok) { progShow(100, `完了しました (${secs()}秒)`, 'done'); if (window.kurotenReload) await window.kurotenReload(); setTimeout(() => { if (progEl) progEl.hidden = true; }, 5000); }
+      else progShow(100, '結果の確認がタイムアウトしました。少し待って手動で再読み込みしてください。', 'err');
+      return;
+    }
+    while (true) {
+      let r;
+      try { r = await ghJSON(`https://api.github.com/repos/${repoPath()}/actions/runs/${run.id}`); }
+      catch (e) { await sleep(5000); continue; }
+      if (r.status === 'queued') progShow(20, `順番待ち(キュー)… (${secs()}秒)`);
+      else if (r.status === 'in_progress') progShow(Math.min(90, 30 + secs() * 1.2), `スクリーニング実行中… (${secs()}秒)`);
+      else if (r.status === 'completed') {
+        if (r.conclusion === 'success') {
+          progShow(95, '完了。最新結果を取得中…', 'done');
+          await waitForNewData(prevDate);
+          if (window.kurotenReload) await window.kurotenReload();
+          progShow(100, `完了しました — 結果を反映しました (${secs()}秒)`, 'done');
+          setTimeout(() => { if (progEl) progEl.hidden = true; }, 6000);
+        } else {
+          progShow(100, `失敗: ${r.conclusion || '不明'} — GitHub の Actions ログを確認してください`, 'err');
+        }
+        return;
+      }
+      await sleep(5000);
+    }
+  }
+
   // --- イベント ---
   function init() {
     fillFiscalOptions();
@@ -197,14 +293,24 @@
       catch (e) { setStatus(e.message, false); }
     };
     g('btnSaveRun').onclick = async () => {
-      try { persistLocal(); setStatus('保存して実行中…'); if (configSha === null) await loadConfig(); await saveConfig(); await runWorkflow();
-        setStatus('保存し、スクリーニングを起動しました(数分後にこのページを再読み込み)', true); }
-      catch (e) { setStatus(e.message, false); }
+      try {
+        persistLocal(); setStatus('保存して実行中…');
+        if (configSha === null) await loadConfig();
+        await saveConfig();
+        const prevDate = await currentDataDate();
+        await runWorkflow();
+        setStatus('保存し、スクリーニングを起動しました', true);
+        trackRun(Date.now(), prevDate);
+      } catch (e) { setStatus(e.message, false); }
     };
     g('btnRun').onclick = async () => {
-      try { persistLocal(); setStatus('実行起動中…'); await runWorkflow();
-        setStatus('スクリーニングを起動しました(数分後に再読み込み)', true); }
-      catch (e) { setStatus(e.message, false); }
+      try {
+        persistLocal(); setStatus('実行起動中…');
+        const prevDate = await currentDataDate();
+        await runWorkflow();
+        setStatus('スクリーニングを起動しました', true);
+        trackRun(Date.now(), prevDate);
+      } catch (e) { setStatus(e.message, false); }
     };
     fillTimeOptions();
     g('btnLoadCron').onclick = loadCron;

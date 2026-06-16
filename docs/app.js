@@ -39,7 +39,7 @@ let selectedCode = null;
 let priceChart = null, quarterChart = null;
 
 // ---------- 初期化 ----------
-(async function init() {
+async function kurotenReload() {
   const [latest, history] = await Promise.all([fetchJSON('data/latest.json'), fetchJSON('data/history.json')]);
   records = (history && history.length) ? history.slice() : (latest ? [latest] : []);
   if (latest && records.length) records[0] = latest; // 最新は株価込みのフルデータ
@@ -55,7 +55,9 @@ let priceChart = null, quarterChart = null;
   sel.onchange = () => selectRecord(parseInt(sel.value, 10));
   if (records.length) selectRecord(0);
   else { $('#emptyState').hidden = false; $('#summary').textContent = 'データがありません'; }
-})();
+}
+window.kurotenReload = kurotenReload;
+kurotenReload();
 
 function selectRecord(i) {
   current = records[i];
