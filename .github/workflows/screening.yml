@@ -1,8 +1,7 @@
 name: スクリーニング自動実行
 
 on:
-  schedule:
-    - cron: '55 12 * * *'
+  # スケジュールは外部(cron-job.org)から workflow_dispatch で起動するため、GitHub内蔵cronは無効化
   workflow_dispatch: {}
 
 permissions:
