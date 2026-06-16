@@ -324,7 +324,11 @@ def run_recent(jq, cfg):
     as_of = as_of_date(cfg)
     codes, seen = [], set()
     start = datetime.datetime.now(JST) - datetime.timedelta(days=cfg["dataDelayDays"])
-    for off in range(cfg["lookbackDays"]):
+    lookback = cfg.get("lookbackDays") or 0
+    if lookback < 1:
+        lookback = 60
+        print(f"lookbackDays<1 -> fallback to {lookback}", file=sys.stderr)
+    for off in range(lookback):
         day = start - datetime.timedelta(days=off)
         if day.weekday() >= 5:
             continue
