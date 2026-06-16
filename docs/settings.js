@@ -6,6 +6,9 @@
   const WORKFLOW_PATH = '.github/workflows/screening.yml';
   let configSha = null;
   let workflowSha = null;
+  let cronOrgLoaded = false;
+  let cronJobId = null;
+  const CRONORG = 'https://api.cron-job.org';
 
   // --- リポジトリ自動判定(<owner>.github.io/<repo>/ から) ---
   function detectRepo() {
@@ -123,6 +126,7 @@
   function persistLocal() {
     localStorage.setItem('gh.repo', g('cfgRepo').value.trim());
     localStorage.setItem('gh.pat', g('cfgPat').value.trim());
+    localStorage.setItem('cronorg.apikey', g('cfgCronApiKey').value.trim());
   }
 
   // --- 自動実行(cron)の読み書き。JST = UTC + 9 ---
@@ -136,53 +140,56 @@
     for (let i = 0; i < 24; i++) { const o = document.createElement('option'); o.value = i; o.textContent = String(i).padStart(2, '0'); h.appendChild(o); }
     for (let i = 0; i < 60; i++) { const o = document.createElement('option'); o.value = i; o.textContent = String(i).padStart(2, '0'); m.appendChild(o); }
   }
+  // --- cron-job.org 連携 ---
+  function cronOrgKey() { return g('cfgCronApiKey').value.trim(); }
+  function cronOrgHeaders() {
+    return { 'Authorization': 'Bearer ' + cronOrgKey(), 'Accept': 'application/json', 'Content-Type': 'application/json' };
+  }
+  // URL に screening.yml/dispatches を含むジョブを自動検出してIDを得る
+  async function resolveCronJobId() {
+    if (cronJobId) return cronJobId;
+    const res = await fetch(CRONORG + '/jobs', { headers: cronOrgHeaders() });
+    if (!res.ok) throw new Error('cron-job.org 接続失敗 HTTP ' + res.status + '(APIキー/IP制限を確認)');
+    const j = await res.json();
+    const jobs = (j && j.jobs) || [];
+    const hit = jobs.find(x => (x.url || '').includes('screening.yml/dispatches'));
+    if (!hit) throw new Error('対象のcronジョブが見つかりません(URLに screening.yml/dispatches を含むジョブを作成してください)');
+    cronJobId = hit.jobId;
+    localStorage.setItem('cronorg.jobid', String(cronJobId));
+    return cronJobId;
+  }
   async function loadCron() {
     try {
+      if (!cronOrgKey()) { cronSetStatus('cron-job.org APIキーを入力してください', false); return; }
       cronSetStatus('読み込み中…');
-      const res = await fetch(`https://api.github.com/repos/${repoPath()}/contents/${WORKFLOW_PATH}`, { headers: ghHeaders() });
+      const id = await resolveCronJobId();
+      const res = await fetch(CRONORG + '/jobs/' + id, { headers: cronOrgHeaders() });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const j = await res.json();
-      workflowSha = j.sha;
-      const text = b64decode(j.content);
-      const mm = text.match(/cron:\s*['"]([^'"]+)['"]/);
-      if (mm) {
-        const parts = mm[1].trim().split(/\s+/);   // m h dom mon dow
-        const utcMin = parseInt(parts[0], 10) || 0;
-        const utcHour = parseInt(parts[1], 10) || 0;
-        g('cfgAutoMin').value = utcMin;
-        g('cfgAutoHour').value = (utcHour + 9) % 24;   // UTC→JST
-      }
+      const sch = (j.jobDetails && j.jobDetails.schedule) || {};
+      const hrs = (sch.hours || []).filter(h => h >= 0);
+      const mins = (sch.minutes || []).filter(m => m >= 0);
+      if (hrs.length) g('cfgAutoHour').value = hrs[0];
+      if (mins.length) g('cfgAutoMin').value = mins[0];
+      cronOrgLoaded = true;
       cronSetStatus('現在の実行時刻を読み込みました', true);
-    } catch (e) { cronSetStatus('読み込み失敗: ' + e.message + '(トークン/権限を確認)', false); }
+    } catch (e) { cronSetStatus('読み込み失敗: ' + e.message, false); }
   }
   async function saveCron() {
     try {
-      cronSetStatus('保存中…');
-      // ユーザーが選んだ時刻を最初に読む(この後の取得処理でフォームを上書きしないこと)
       const jstHour = parseInt(g('cfgAutoHour').value, 10);
       const jstMin = parseInt(g('cfgAutoMin').value, 10);
       if (isNaN(jstHour) || isNaN(jstMin)) throw new Error('時刻を選択してください');
-      // SHAは下のGET取得で得るため、フォームを上書きする loadCron は呼ばない
-      const res0 = await fetch(`https://api.github.com/repos/${repoPath()}/contents/${WORKFLOW_PATH}`, { headers: ghHeaders() });
-      if (!res0.ok) throw new Error('HTTP ' + res0.status);
-      const j0 = await res0.json();
-      workflowSha = j0.sha;
-      let text = b64decode(j0.content);
-      const utcHour = (jstHour - 9 + 24) % 24;
-      const newCron = `${jstMin} ${utcHour} * * *`;
-      if (!/cron:\s*['"][^'"]+['"]/.test(text)) throw new Error('cron行が見つかりません');
-      text = text.replace(/cron:\s*['"][^'"]+['"]/, `cron: '${newCron}'`);
-      const put = await fetch(`https://api.github.com/repos/${repoPath()}/contents/${WORKFLOW_PATH}`, {
-        method: 'PUT', headers: ghHeaders(),
-        body: JSON.stringify({ message: '実行時刻を更新(Webから)', content: b64encode(text), sha: workflowSha, branch: 'main' }),
-      });
-      if (!put.ok) throw new Error('保存失敗 HTTP ' + put.status + '(Workflows権限を確認)');
-      const pj = await put.json();
-      workflowSha = pj.content.sha;
-      cronSetStatus(`実行時刻を ${String(jstHour).padStart(2, '0')}:${String(jstMin).padStart(2, '0')} JST に保存しました`, true);
+      if (!cronOrgKey()) throw new Error('cron-job.org APIキーを入力してください');
+      cronSetStatus('保存中…');
+      const id = await resolveCronJobId();
+      const body = { job: { schedule: { timezone: 'Asia/Tokyo', hours: [jstHour], minutes: [jstMin], mdays: [-1], months: [-1], wdays: [-1] } } };
+      const res = await fetch(CRONORG + '/jobs/' + id, { method: 'PATCH', headers: cronOrgHeaders(), body: JSON.stringify(body) });
+      if (!res.ok) throw new Error('保存失敗 HTTP ' + res.status + '(APIキー/IP制限を確認)');
+      cronOrgLoaded = true;
+      cronSetStatus(`実行時刻を ${String(jstHour).padStart(2, '0')}:${String(jstMin).padStart(2, '0')} (JST) に保存しました`, true);
     } catch (e) { cronSetStatus(e.message, false); }
   }
-
   // --- 実行の進捗表示(GitHub Actions を追跡) ---
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   let progEl = null, progFill = null, progText = null, progStart = 0;
@@ -289,11 +296,12 @@
     fillFiscalOptions();
     g('cfgRepo').value = detectRepo();
     g('cfgPat').value = localStorage.getItem('gh.pat') || '';
+    g('cfgCronApiKey').value = localStorage.getItem('cronorg.apikey') || '';
     g('settingsToggle').onclick = () => {
       const p = g('settingsPanel'); p.hidden = !p.hidden;
       if (!p.hidden && g('cfgPat').value && !configSha) loadConfig();
       // パネルを開いたら保存済みのスケジュール時刻も自動で反映(0:00のままにしない)
-      if (!p.hidden && g('cfgPat').value && workflowSha === null) loadCron();
+      if (!p.hidden && cronOrgKey() && !cronOrgLoaded) loadCron();
     };
     g('cfgScanMode').onchange = toggleCodeRow;
     g('btnLoad').onclick = () => { persistLocal(); loadConfig(); };
@@ -322,8 +330,8 @@
       } catch (e) { setStatus(e.message, false); }
     };
     fillTimeOptions();
-    g('btnLoadCron').onclick = loadCron;
-    g('btnSaveCron').onclick = saveCron;
+    g('btnLoadCron').onclick = () => { persistLocal(); loadCron(); };
+    g('btnSaveCron').onclick = () => { persistLocal(); saveCron(); };
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
