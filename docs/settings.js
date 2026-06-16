@@ -127,6 +127,8 @@
     localStorage.setItem('gh.repo', g('cfgRepo').value.trim());
     localStorage.setItem('gh.pat', g('cfgPat').value.trim());
     localStorage.setItem('cronorg.apikey', g('cfgCronApiKey').value.trim());
+    const sk = g('cfgSyncKey'); if (sk) localStorage.setItem('sync.key', sk.value.trim());
+    const sb = g('cfgSyncBin'); if (sb) localStorage.setItem('sync.bin', sb.value.trim());
   }
 
   // --- 自動実行(cron)の読み書き。JST = UTC + 9 ---
@@ -297,6 +299,8 @@
     g('cfgRepo').value = detectRepo();
     g('cfgPat').value = localStorage.getItem('gh.pat') || '';
     g('cfgCronApiKey').value = localStorage.getItem('cronorg.apikey') || '';
+    g('cfgSyncKey').value = localStorage.getItem('sync.key') || '';
+    g('cfgSyncBin').value = localStorage.getItem('sync.bin') || '';
     g('settingsToggle').onclick = () => {
       const p = g('settingsPanel'); p.hidden = !p.hidden;
       if (!p.hidden && g('cfgPat').value && !configSha) loadConfig();
@@ -332,6 +336,8 @@
     fillTimeOptions();
     g('btnLoadCron').onclick = () => { persistLocal(); loadCron(); };
     g('btnSaveCron').onclick = () => { persistLocal(); saveCron(); };
+    g('btnSyncUp').onclick = () => { persistLocal(); if (window.kurotenSyncUpload) window.kurotenSyncUpload(); };
+    g('btnSyncDown').onclick = () => { persistLocal(); if (window.kurotenSyncDownload) window.kurotenSyncDownload(); };
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();

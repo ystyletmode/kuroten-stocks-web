@@ -68,6 +68,21 @@
     </div>
 
     <div class="grp">
+      <div class="grp-title">ウォッチリスト同期(クラウド)</div>
+      <div class="frow"><label>jsonbin.io APIキー</label>
+        <input id="cfgSyncKey" type="password" placeholder="X-Master-Key"></div>
+      <div class="frow"><label>Bin ID</label>
+        <input id="cfgSyncBin" type="text" placeholder="初回アップロードで自動採番されます"></div>
+      <div class="frow">
+        <button id="btnSyncUp" class="btn primary">クラウドへ保存</button>
+        <button id="btnSyncDown" class="btn">クラウドから読み込み</button>
+        <span id="syncStatus" class="cfgstatus"></span>
+      </div>
+      <div class="hint">ウォッチリストを jsonbin.io(無料)に保存して端末間で同期します。jsonbin.io でアカウント作成 → API Keys の Master Key を入力 → 「クラウドへ保存」で非公開binを作成します。表示された Bin ID を別端末でも同じキーと一緒に入力すれば同期されます。以後は★の追加/削除で自動保存されます(このブラウザ内にのみキーを保存)。
+        <a href="https://jsonbin.io" target="_blank">jsonbin.io を開く</a></div>
+    </div>
+
+    <div class="grp">
       <div class="grp-title">投資予算</div>
       <div class="frow"><label><input id="cfgBudgetOn" type="checkbox"> 予算で絞り込む</label>
         <span><input id="cfgBudget" type="number" style="width:120px"> 円</span></div>
