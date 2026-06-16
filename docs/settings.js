@@ -158,14 +158,16 @@
   async function saveCron() {
     try {
       cronSetStatus('保存中…');
-      if (workflowSha === null) await loadCron();
+      // ユーザーが選んだ時刻を最初に読む(この後の取得処理でフォームを上書きしないこと)
+      const jstHour = parseInt(g('cfgAutoHour').value, 10);
+      const jstMin = parseInt(g('cfgAutoMin').value, 10);
+      if (isNaN(jstHour) || isNaN(jstMin)) throw new Error('時刻を選択してください');
+      // SHAは下のGET取得で得るため、フォームを上書きする loadCron は呼ばない
       const res0 = await fetch(`https://api.github.com/repos/${repoPath()}/contents/${WORKFLOW_PATH}`, { headers: ghHeaders() });
       if (!res0.ok) throw new Error('HTTP ' + res0.status);
       const j0 = await res0.json();
       workflowSha = j0.sha;
       let text = b64decode(j0.content);
-      const jstHour = parseInt(g('cfgAutoHour').value, 10);
-      const jstMin = parseInt(g('cfgAutoMin').value, 10);
       const utcHour = (jstHour - 9 + 24) % 24;
       const newCron = `${jstMin} ${utcHour} * * *`;
       if (!/cron:\s*['"][^'"]+['"]/.test(text)) throw new Error('cron行が見つかりません');
