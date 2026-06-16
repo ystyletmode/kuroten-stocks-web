@@ -292,6 +292,8 @@
     g('settingsToggle').onclick = () => {
       const p = g('settingsPanel'); p.hidden = !p.hidden;
       if (!p.hidden && g('cfgPat').value && !configSha) loadConfig();
+      // パネルを開いたら保存済みのスケジュール時刻も自動で反映(0:00のままにしない)
+      if (!p.hidden && g('cfgPat').value && workflowSha === null) loadCron();
     };
     g('cfgScanMode').onchange = toggleCodeRow;
     g('btnLoad').onclick = () => { persistLocal(); loadConfig(); };
