@@ -259,19 +259,24 @@
       let r;
       try { r = await ghJSON(`https://api.github.com/repos/${repoPath()}/actions/runs/${run.id}`); }
       catch (e) { await sleep(5000); continue; }
-      if (r.status === 'queued') progShow(20, `順番待ち(キュー)… (${secs()}秒)`);
-      else if (r.status === 'in_progress') progShow(Math.min(90, 30 + secs() * 1.2), `スクリーニング実行中… (${secs()}秒)`);
-      else if (r.status === 'completed') {
+      const st = r.status;
+      if (st === 'completed') {
         if (r.conclusion === 'success') {
           progShow(95, '完了。最新結果を取得中…', 'done');
           await waitForNewData(prevDate);
           if (window.kurotenReload) await window.kurotenReload();
           progShow(100, `完了しました — 結果を反映しました (${secs()}秒)`, 'done');
           setTimeout(() => { if (progEl) progEl.hidden = true; }, 6000);
+        } else if (r.conclusion === 'cancelled') {
+          progShow(100, 'キャンセルされました（別の実行と重複した可能性）。もう一度お試しください。', 'err');
         } else {
           progShow(100, `失敗: ${r.conclusion || '不明'} — GitHub の Actions ログを確認してください`, 'err');
         }
         return;
+      } else if (st === 'in_progress') {
+        progShow(Math.min(90, 30 + secs() * 1.2), `スクリーニング実行中… (${secs()}秒)`);
+      } else {
+        progShow(20, `順番待ち（実行枠の確保中）… (${secs()}秒)`);
       }
       await sleep(5000);
     }
