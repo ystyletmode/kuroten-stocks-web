@@ -37,6 +37,7 @@ let records = [];
 let current = null;       // 選択中の調査レコード
 let selectedCode = null;
 let priceChart = null, quarterChart = null;
+let simMarkerDate = null;   // 購入シミュレーションの購入日マーカー
 
 // ---------- 初期化 ----------
 async function kurotenReload() {
@@ -125,6 +126,17 @@ function selectStock(code) {
       <div class="cap">単位: 円。縦軸は変動が見やすいよう自動調整(0起点ではありません)。</div>
     </div>
 
+    <div class="section-title">購入シミュレーション</div>
+    <div class="chartbox simbox">
+      <div class="simctl">
+        <span><label for="simDate">購入日</label><input type="date" id="simDate"></span>
+        <span><label for="simShares">株数</label><input type="number" id="simShares" min="100" step="100" value="100" style="width:110px"> 株</span>
+        <span class="simhint" id="simLot"></span>
+      </div>
+      <div id="simResult" class="cards" style="margin:0"></div>
+      <div class="cap">購入日の終値で取得し、最新終値で評価した想定です(手数料・税金・配当は含みません)。購入日が休場の場合は直後の営業日の終値を使用します。</div>
+    </div>
+
     <div class="chartbox">
       <div class="legend">
         <span><span class="sq" style="background:var(--green)"></span>営業利益</span>
@@ -143,6 +155,7 @@ function selectStock(code) {
       </div>`).join('')}</div>
   `;
   drawCharts(s);
+  renderSimSetup(s);
 }
 
 // ---------- チャート ----------
@@ -173,7 +186,8 @@ function drawCharts(s) {
       data: { datasets: [{ data: pricePts, borderColor: pc, backgroundColor: pc + '22',
         fill: true, pointRadius: 0, borderWidth: 1.6, tension: .25 }] },
       options: baseOpts(xScale, { min: lo - pad, max: hi + pad,
-        ticks: { callback: v => '¥' + Math.round(v).toLocaleString(), font: { size: 10 } } })
+        ticks: { callback: v => '¥' + Math.round(v).toLocaleString(), font: { size: 10 } } }),
+      plugins: [buyMarkerPlugin]
     });
   } else {
     const ctx = $('#priceChart').getContext('2d');
@@ -225,3 +239,87 @@ function baseOpts(xScale, yScale) {
 }
 
 function esc(s) { return (s ?? '').toString().replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+// ---------- 購入シミュレーション ----------
+const buyMarkerPlugin = {
+  id: 'buyMarker',
+  afterDatasetsDraw(chart) {
+    if (!simMarkerDate) return;
+    const x = chart.scales.x.getPixelForValue(new Date(simMarkerDate).getTime());
+    if (x == null || isNaN(x)) return;
+    const { top, bottom } = chart.chartArea;
+    const c = chart.ctx; c.save();
+    c.setLineDash([4, 3]); c.strokeStyle = getCss('--blue'); c.lineWidth = 2;
+    c.beginPath(); c.moveTo(x, top); c.lineTo(x, bottom); c.stroke();
+    c.setLineDash([]); c.fillStyle = getCss('--blue');
+    c.font = 'bold 10px sans-serif'; c.textAlign = 'center';
+    c.fillText('購入', x, top + 10); c.restore();
+  }
+};
+
+// 指定日「以降」で最初に存在する終値を返す(休場日対策)。無ければ最後の終値。
+function closeOnOrAfter(prices, dateStr) {
+  if (!prices || !prices.length) return null;
+  const t = new Date(dateStr).getTime();
+  if (isNaN(t)) return null;
+  for (const p of prices) { if (new Date(p.date).getTime() >= t) return p; }
+  return prices[prices.length - 1];
+}
+
+function renderSimSetup(s) {
+  const dateEl = $('#simDate'), shEl = $('#simShares');
+  if (!dateEl || !shEl) return;
+  const prices = s.prices || [];
+  if (!prices.length) {
+    simMarkerDate = null;
+    $('#simResult').innerHTML = '<div class="cap">株価データがないためシミュレーションできません。</div>';
+    $('#simLot').textContent = '';
+    return;
+  }
+  const minD = prices[0].date, maxD = prices[prices.length - 1].date;
+  // 既定の購入日 = 黒字転換(メソッドの初動)。範囲外なら最古の終値日。
+  let defD = minD;
+  const ti = s.turnoverIndex;
+  if (ti >= 0 && s.quarterly && s.quarterly[ti] && s.quarterly[ti].periodEnd) {
+    const td = s.quarterly[ti].periodEnd;
+    if (td >= minD && td <= maxD) defD = td;
+  }
+  dateEl.min = minD; dateEl.max = maxD; dateEl.value = defD;
+  if (!shEl.value || +shEl.value < 100) shEl.value = 100;
+  const run = () => renderSim(s);
+  dateEl.oninput = run; shEl.oninput = run;
+  run();
+}
+
+function renderSim(s) {
+  const out = $('#simResult'); if (!out) return;
+  const prices = s.prices || [];
+  const dateEl = $('#simDate'), shEl = $('#simShares'), lotEl = $('#simLot');
+  let shares = Math.floor((parseInt(shEl.value, 10) || 0) / 100) * 100;
+  if (shares < 100) shares = 100;
+  const buy = closeOnOrAfter(prices, dateEl.value);
+  const last = prices.length ? prices[prices.length - 1] : null;
+  if (!buy || !last) {
+    out.innerHTML = '<div class="cap">株価データがないためシミュレーションできません。</div>';
+    simMarkerDate = null; if (priceChart) priceChart.update(); return;
+  }
+  simMarkerDate = buy.date; if (priceChart) priceChart.update();
+  if (lotEl) lotEl.textContent = (shares / 100) + '単元';
+  const cost = buy.close * shares;
+  const val = last.close * shares;
+  const pl = val - cost;
+  const pct = cost > 0 ? pl / cost * 100 : 0;
+  const tgtPl = (s.target != null) ? (s.target - buy.close) * shares : null;
+  const plCol = pl >= 0 ? 'var(--green)' : 'var(--red)';
+  const signYen = (n) => (n >= 0 ? '+' : '−') + '¥' + Math.abs(Math.round(n)).toLocaleString();
+  const signPct = (n) => (n >= 0 ? '+' : '−') + Math.abs(n).toFixed(1) + '%';
+  out.innerHTML = `
+    <div class="card"><div class="k">取得単価 (${buy.date})</div><div class="v">${yen0(buy.close)}</div></div>
+    <div class="card"><div class="k">取得額 (${shares.toLocaleString()}株)</div><div class="v">${yen0(cost)}</div></div>
+    <div class="card"><div class="k">現在値 (${last.date})</div><div class="v">${yen0(last.close)}</div></div>
+    <div class="card"><div class="k">評価額</div><div class="v">${yen0(val)}</div></div>
+    <div class="card"><div class="k">評価損益</div><div class="v" style="color:${plCol}">${signYen(pl)}</div></div>
+    <div class="card"><div class="k">騰落率</div><div class="v" style="color:${plCol}">${signPct(pct)}</div></div>
+    ${tgtPl != null ? `<div class="card"><div class="k">2倍利確時の損益(参考)</div><div class="v" style="color:var(--green)">${signYen(tgtPl)}</div></div>` : ''}
+  `;
+}

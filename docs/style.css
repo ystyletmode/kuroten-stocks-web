@@ -41,6 +41,12 @@ h2{font-size:20px;margin:0 0 2px}
 .section-title{font-weight:700;margin:16px 0 6px}
 .chartbox{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px}
 .chartbox .cap{font-size:11px;color:var(--muted);margin-top:4px}
+.simbox .simctl{display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin-bottom:10px}
+.simbox .simctl span{display:inline-flex;align-items:center;gap:6px}
+.simbox .simctl label{color:var(--muted);font-size:12px}
+.simbox .simctl input{font-size:14px;padding:6px 8px;border:1px solid var(--line);border-radius:7px}
+.simbox .simhint{color:var(--muted);font-size:12px}
+.simbox .cards{margin:0}
 .factor{display:flex;gap:10px;padding:4px 0}
 .factor .pt{width:46px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
 .factor .ft{font-weight:600}
