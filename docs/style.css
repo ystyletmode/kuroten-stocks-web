@@ -82,3 +82,14 @@ footer{padding:12px 18px;color:var(--muted);font-size:11px;border-top:1px solid 
   main{flex-direction:column}
   #listPane{width:auto;border-right:none;border-bottom:1px solid var(--line);max-height:46vh}
 }
+
+/* ウォッチリスト */
+.viewtoggle{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.vbtn{font-size:13px;padding:4px 10px;border:none;background:var(--card);cursor:pointer;color:var(--text)}
+.vbtn:not(.active):hover{background:#f0f2f4}
+.vbtn.active{background:var(--teal);color:#fff}
+.row .star{margin-left:4px;flex:none;border:none;background:transparent;font-size:18px;line-height:1;cursor:pointer;color:#c2c8cf;padding:2px 4px;align-self:center}
+.row .star.on{color:#e0a93b}
+.row .star:hover{color:#e0a93b}
+.detail .head .detailstar{margin-left:auto;align-self:flex-start;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;color:#9aa3ad;white-space:nowrap}
+.detail .head .detailstar.on{background:#fff7e6;border-color:#e0a93b;color:#b8801f}

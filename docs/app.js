@@ -38,6 +38,9 @@ let current = null;       // 選択中の調査レコード
 let selectedCode = null;
 let priceChart = null, quarterChart = null;
 let simMarkerDate = null;   // 購入シミュレーションの購入日マーカー
+let viewMode = 'ranking';     // 'ranking' | 'watchlist'
+const WATCH_KEY = 'kuroten.watchlist';
+let watchlist = loadWatchlist();
 
 // ---------- 初期化 ----------
 async function kurotenReload() {
@@ -54,6 +57,10 @@ async function kurotenReload() {
     sel.appendChild(opt);
   });
   sel.onchange = () => selectRecord(parseInt(sel.value, 10));
+  $('#viewRanking').onclick = () => setViewMode('ranking');
+  $('#viewWatch').onclick = () => setViewMode('watchlist');
+  refreshWatchlistFromLatest();
+  updateWatchCount();
   if (records.length) selectRecord(0);
   else { $('#emptyState').hidden = false; $('#summary').textContent = 'データがありません'; }
 }
@@ -63,21 +70,28 @@ kurotenReload();
 function selectRecord(i) {
   current = records[i];
   if (!current) return;
+  if (viewMode === 'watchlist') { renderList(); return; }
   $('#summary').textContent = `${current.mode} ・ ${current.summary}`;
-  renderRanking();
+  renderList();
   const first = current.results[0];
   selectStock(first ? first.code : null);
 }
 
-function renderRanking() {
+function renderList() {
   const list = $('#rankingList');
   list.innerHTML = '';
-  $('#emptyState').hidden = current.results.length > 0;
-  current.results.forEach((s) => {
+  const results = activeResults();
+  const empty = $('#emptyState');
+  empty.hidden = results.length > 0;
+  empty.textContent = viewMode === 'watchlist'
+    ? '★ウォッチリストは空です。銘柄の☆を押して追加してください。'
+    : '条件に該当する銘柄がありません。';
+  results.forEach((s) => {
     const row = document.createElement('div');
     row.className = 'row' + (s.code === selectedCode ? ' active' : '');
     row.onclick = () => selectStock(s.code);
     const col = badgeColor(s.score);
+    const watched = isWatched(s.code);
     row.innerHTML = `
       <div class="badge" style="color:${col};background:${col}22;border:2px solid ${col}">
         ${Math.round(s.score)}<small>点</small></div>
@@ -88,15 +102,82 @@ function renderRanking() {
       <div class="rowprice">
         <div>${yen0(s.price)}</div>
         ${s.target ? `<div class="tgt">目標 ${yen0(s.target)}</div>` : ''}
-      </div>`;
+      </div>
+      <button class="star${watched ? ' on' : ''}" title="ウォッチリスト">${watched ? '★' : '☆'}</button>`;
+    const st = row.querySelector('.star');
+    st.onclick = (e) => { e.stopPropagation(); toggleWatch(s.code); };
     list.appendChild(row);
   });
 }
 
+// ---------- ウォッチリスト ----------
+function loadWatchlist() {
+  try { return JSON.parse(localStorage.getItem(WATCH_KEY) || '{}') || {}; } catch (e) { return {}; }
+}
+function saveWatchlist() {
+  try { localStorage.setItem(WATCH_KEY, JSON.stringify(watchlist)); } catch (e) {}
+  updateWatchCount();
+}
+function isWatched(code) { return !!watchlist[code]; }
+function updateWatchCount() {
+  const el = $('#watchCount'); if (!el) return;
+  const n = Object.keys(watchlist).length;
+  el.textContent = n ? ' (' + n + ')' : '';
+}
+function snapshotOf(code) {
+  const fromLatest = ((records[0] && records[0].results) || []).find(x => x.code === code);
+  const fromCurrent = ((current && current.results) || []).find(x => x.code === code);
+  return fromLatest || fromCurrent || null;
+}
+function toggleWatch(code) {
+  if (watchlist[code]) { delete watchlist[code]; }
+  else {
+    const s = snapshotOf(code);
+    if (!s) return;
+    watchlist[code] = Object.assign({}, s, { addedAt: Date.now() });
+  }
+  saveWatchlist();
+  renderList();
+  const res = activeResults();
+  const sel = res.find(x => x.code === selectedCode) ? selectedCode : (res[0] ? res[0].code : null);
+  selectStock(sel);
+}
+function refreshWatchlistFromLatest() {
+  const latest = (records[0] && records[0].results) || [];
+  let changed = false;
+  latest.forEach(s => {
+    if (watchlist[s.code]) {
+      const addedAt = watchlist[s.code].addedAt;
+      watchlist[s.code] = Object.assign({}, s, { addedAt });
+      changed = true;
+    }
+  });
+  if (changed) saveWatchlist();
+}
+function watchlistResults() {
+  return Object.values(watchlist).sort((a, b) => (b.score || 0) - (a.score || 0));
+}
+function activeResults() {
+  return viewMode === 'watchlist' ? watchlistResults() : ((current && current.results) || []);
+}
+function setViewMode(mode) {
+  viewMode = mode;
+  $('#viewRanking').classList.toggle('active', mode === 'ranking');
+  $('#viewWatch').classList.toggle('active', mode === 'watchlist');
+  const histLabel = $('#historySelect').closest('label');
+  if (histLabel) histLabel.style.display = (mode === 'ranking') ? '' : 'none';
+  renderList();
+  const res = activeResults();
+  if (mode === 'watchlist') $('#summary').textContent = `ウォッチリスト ・ ${res.length}銘柄`;
+  else if (current) $('#summary').textContent = `${current.mode} ・ ${current.summary}`;
+  const sel = res.find(x => x.code === selectedCode) ? selectedCode : (res[0] ? res[0].code : null);
+  selectStock(sel);
+}
+
 function selectStock(code) {
   selectedCode = code;
-  renderRanking();
-  const s = (current.results || []).find((x) => x.code === code);
+  renderList();
+  const s = activeResults().find((x) => x.code === code);
   const detail = $('#detail'), empty = $('#detailEmpty');
   if (!s) { detail.hidden = true; empty.hidden = false; return; }
   empty.hidden = true; detail.hidden = false;
@@ -110,6 +191,7 @@ function selectStock(code) {
         <div class="headsub">${s.code}・${esc(s.market)}・${esc(s.sector33 || '')}</div>
         <div class="headsub" style="font-size:12px">直近開示: ${s.lastDisclosed || '-'}</div>
       </div>
+      <button class="detailstar${isWatched(s.code) ? ' on' : ''}" title="ウォッチリスト">${isWatched(s.code) ? '★ ウォッチ中' : '☆ ウォッチ'}</button>
     </div>
     <div class="section-title">売買プラン(メソッド: 2倍で利確)</div>
     <div class="cards">
@@ -154,6 +236,8 @@ function selectStock(code) {
         <div><div class="ft">${esc(f.title)}</div><div class="fd">${esc(f.detail)}</div></div>
       </div>`).join('')}</div>
   `;
+  const dstar = detail.querySelector('.detailstar');
+  if (dstar) dstar.onclick = () => toggleWatch(s.code);
   drawCharts(s);
   renderSimSetup(s);
 }
