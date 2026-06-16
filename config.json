@@ -7,7 +7,7 @@
     "4385",
     "3038"
   ],
-  "minScore": 80,
+  "minScore": 60,
   "market": null,
   "fiscalMonth": null,
   "themeKeyword": "",
@@ -16,7 +16,7 @@
   "requestsPerMinute": 60,
   "dataDelayDays": 0,
   "lookbackDays": 0,
-  "maxCandidates": 500,
+  "maxCandidates": 100,
   "email": {
     "enabled": true,
     "from": "ystyletmode@gmail.com",
