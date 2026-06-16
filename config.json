@@ -15,7 +15,7 @@
   "applyBudgetFilter": false,
   "requestsPerMinute": 60,
   "dataDelayDays": 0,
-  "lookbackDays": 0,
+  "lookbackDays": 60,
   "maxCandidates": 300,
   "email": {
     "enabled": true,
