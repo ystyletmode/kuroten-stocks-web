@@ -7,8 +7,8 @@
     "4385",
     "3038"
   ],
-  "minScore": 60,
-  "market": null,
+  "minScore": 80,
+  "market": "プライム",
   "fiscalMonth": null,
   "themeKeyword": "",
   "budgetYen": 200000,
@@ -16,9 +16,9 @@
   "requestsPerMinute": 60,
   "dataDelayDays": 0,
   "lookbackDays": 0,
-  "maxCandidates": 60,
+  "maxCandidates": 500,
   "email": {
-    "enabled": false,
+    "enabled": true,
     "from": "ystyletmode@gmail.com",
     "to": "tmnr4@icloud.com"
   }
