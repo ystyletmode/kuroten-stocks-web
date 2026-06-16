@@ -16,7 +16,7 @@
   "requestsPerMinute": 60,
   "dataDelayDays": 0,
   "lookbackDays": 60,
-  "maxCandidates": 300,
+  "maxCandidates": 500,
   "email": {
     "enabled": true,
     "from": "ystyletmode@gmail.com",
