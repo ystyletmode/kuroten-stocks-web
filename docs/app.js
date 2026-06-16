@@ -134,7 +134,7 @@ function selectStock(code) {
         <span class="simhint" id="simLot"></span>
       </div>
       <div id="simResult" class="cards" style="margin:0"></div>
-      <div class="cap">購入日の終値で取得し、最新終値で評価した想定です(手数料・税金・配当は含みません)。購入日が休場の場合は直後の営業日の終値を使用します。</div>
+      <div class="cap">購入日の終値で取得し、最新終値で評価した想定です(手数料・税金・配当は含みません)。購入日が休場の場合は直後の営業日の終値を使用します。既定は<b>決算開示日の翌営業日</b>(黒字転換が判明し、現実に買える最短の初動)。四半期末は開示前で実際には買えないため使いません。</div>
     </div>
 
     <div class="chartbox">
@@ -277,12 +277,16 @@ function renderSimSetup(s) {
     return;
   }
   const minD = prices[0].date, maxD = prices[prices.length - 1].date;
-  // 既定の購入日 = 黒字転換(メソッドの初動)。範囲外なら最古の終値日。
+  // 既定の購入日 = 決算開示日の翌営業日(現実に買える最短の初動)。
+  // 黒字転換は四半期末ではなく開示時に判明するため、開示日以前は先読みになる。
   let defD = minD;
-  const ti = s.turnoverIndex;
-  if (ti >= 0 && s.quarterly && s.quarterly[ti] && s.quarterly[ti].periodEnd) {
-    const td = s.quarterly[ti].periodEnd;
-    if (td >= minD && td <= maxD) defD = td;
+  if (s.lastDisclosed) {
+    const ld = s.lastDisclosed;
+    const after = prices.find(p => p.date > ld);     // 開示日の翌営業日(引け後開示が多いため)
+    if (after) defD = after.date;
+    else { const oa = closeOnOrAfter(prices, ld); if (oa) defD = oa.date; }
+    if (defD < minD) defD = minD;
+    if (defD > maxD) defD = maxD;
   }
   dateEl.min = minD; dateEl.max = maxD; dateEl.value = defD;
   if (!shEl.value || +shEl.value < 100) shEl.value = 100;
