@@ -83,7 +83,7 @@
       applyBudgetFilter: g('cfgBudgetOn').checked,
       requestsPerMinute: num(g('cfgRpm').value, 5),
       dataDelayDays: num(g('cfgDelay').value, 90),
-      lookbackDays: num(g('cfgLookback').value, 60),
+      lookbackDays: (() => { const v = num(g('cfgLookback').value, 60); return v < 1 ? 60 : v; })(),
       maxCandidates: num(g('cfgMaxCand').value, 50),
       email: { enabled: g('cfgEmailOn').checked, from: g('cfgEmailFrom').value.trim(), to: g('cfgEmailTo').value.trim() },
     };
