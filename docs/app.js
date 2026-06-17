@@ -134,8 +134,19 @@ function renderList() {
 function loadWatchlist() {
   try { return JSON.parse(localStorage.getItem(WATCH_KEY) || '{}') || {}; } catch (e) { return {}; }
 }
+// ウォッチ保存用に重い株価配列を除いた軽量コピーを作る(同期の容量超過を防ぐ)
+function lightSnap(o) {
+  const t = Object.assign({}, o);
+  delete t.ohlc; delete t.ohlcM; delete t.prices;
+  return t;
+}
+function lightWatchlist() {
+  const out = {};
+  for (const k in watchlist) out[k] = lightSnap(watchlist[k]);
+  return out;
+}
 function saveWatchlist() {
-  try { localStorage.setItem(WATCH_KEY, JSON.stringify(watchlist)); } catch (e) {}
+  try { localStorage.setItem(WATCH_KEY, JSON.stringify(lightWatchlist())); } catch (e) {}
   updateWatchCount();
 }
 function isWatched(code) { return !!watchlist[code]; }
@@ -198,7 +209,11 @@ function setViewMode(mode) {
 function selectStock(code) {
   selectedCode = code;
   renderList();
-  const s = activeResults().find((x) => x.code === code);
+  let s = activeResults().find((x) => x.code === code);
+  if (s && !(s.ohlc && s.ohlc.length)) {                 // 軽量スナップショットは最新データで補完(チャート用)
+    const full = ((records[0] && records[0].results) || []).find(x => x.code === code);
+    if (full) s = Object.assign({}, full, { addedAt: s.addedAt });
+  }
   const detail = $('#detail'), empty = $('#detailEmpty');
   if (!s) { detail.hidden = true; empty.hidden = false; return; }
   empty.hidden = true; detail.hidden = false;
@@ -295,7 +310,7 @@ async function syncPull() {
     const obj = (data && data.record) ? data.record : data;
     if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
       watchlist = obj;
-      try { localStorage.setItem(WATCH_KEY, JSON.stringify(watchlist)); } catch (e) {}
+      try { localStorage.setItem(WATCH_KEY, JSON.stringify(lightWatchlist())); } catch (e) {}
       updateWatchCount(); renderList();
       if (selectedCode) selectStock(selectedCode);
     }
@@ -310,9 +325,9 @@ async function syncPush() {
   try {
     let r;
     if (bin) {
-      r = await fetch(`${JSONBIN}/${bin}`, { method: 'PUT', headers: { 'X-Master-Key': key, 'Content-Type': 'application/json' }, body: JSON.stringify(watchlist) });
+      r = await fetch(`${JSONBIN}/${bin}`, { method: 'PUT', headers: { 'X-Master-Key': key, 'Content-Type': 'application/json' }, body: JSON.stringify(lightWatchlist()) });
     } else {
-      r = await fetch(`${JSONBIN}`, { method: 'POST', headers: { 'X-Master-Key': key, 'Content-Type': 'application/json', 'X-Bin-Private': 'true', 'X-Bin-Name': 'kuroten-watchlist' }, body: JSON.stringify(watchlist) });
+      r = await fetch(`${JSONBIN}`, { method: 'POST', headers: { 'X-Master-Key': key, 'Content-Type': 'application/json', 'X-Bin-Private': 'true', 'X-Bin-Name': 'kuroten-watchlist' }, body: JSON.stringify(lightWatchlist()) });
     }
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
