@@ -39,7 +39,7 @@ async function fetchJSON(url) {
 let records = [];
 let current = null;       // 選択中の調査レコード
 let selectedCode = null;
-let priceChart = null, quarterChart = null;
+let priceChart = null, quarterChart = null, volChart = null, curTF = 'D';
 let simMarkerDate = null;   // 購入シミュレーションの購入日マーカー
 let viewMode = 'ranking';     // 'ranking' | 'watchlist'
 const WATCH_KEY = 'kuroten.watchlist';
@@ -228,9 +228,16 @@ function selectStock(code) {
     ${irSection(s)}
 
     <div class="chartbox">
-      <div class="section-title" style="margin-top:0">株価の推移(日次終値)</div>
-      <div style="height:200px"><canvas id="priceChart"></canvas></div>
-      <div class="cap">単位: 円。橙=25日移動平均線 / 紫破線=75日移動平均線。縦軸は変動が見やすいよう自動調整(0起点ではありません)。</div>
+      <div class="section-title" style="margin-top:0">株価チャート（ローソク足）</div>
+      <div class="tfbar">
+        <button class="tfbtn active" data-tf="D">日足</button>
+        <button class="tfbtn" data-tf="W">週足</button>
+        <button class="tfbtn" data-tf="M">月足</button>
+        <button class="tfbtn ext" data-tf="5m">5分足 ↗</button>
+      </div>
+      <div style="height:230px"><canvas id="priceChart"></canvas></div>
+      <div style="height:96px;margin-top:2px"><canvas id="volChart"></canvas></div>
+      <div class="cap">ローソク足（緑=陽線 / 赤=陰線）。移動平均線 橙=5 / 青=25 / 紫=75。下段=出来高。「5分足」は外部チャート(TradingView)を別タブで開きます。</div>
     </div>
 
     <div class="section-title">購入シミュレーション</div>
@@ -337,41 +344,131 @@ function sharedDomain(s) {
 }
 
 function drawCharts(s) {
+  curTF = 'D';
+  drawQuarterChart(s);
+  drawPriceArea(s);
+  document.querySelectorAll('.tfbtn').forEach(btn => {
+    btn.onclick = () => {
+      const tf = btn.dataset.tf;
+      if (tf === '5m') {
+        const code = s.code || (s.stock && s.stock.code) || '';
+        window.open('https://www.tradingview.com/chart/?symbol=TSE:' + code + '&interval=5', '_blank');
+        return;
+      }
+      curTF = tf;
+      document.querySelectorAll('.tfbtn').forEach(b => b.classList.toggle('active', b === btn));
+      drawPriceArea(s);
+    };
+  });
+}
+
+// 外部依存なしのローソク足描画プラグイン
+const candlePlugin = {
+  id: 'candles',
+  afterDatasetsDraw(chart) {
+    const cs = chart.$candles; if (!cs || !cs.length) return;
+    const x = chart.scales.x, y = chart.scales.y, area = chart.chartArea, ctx = chart.ctx;
+    const bw = Math.max(1, Math.min(13, (area.right - area.left) / cs.length * 0.62));
+    ctx.save();
+    cs.forEach(k => {
+      const px = x.getPixelForValue(k.t.getTime());
+      if (px == null || isNaN(px)) return;
+      const up = k.c >= k.o;
+      const col = up ? getCss('--green') : getCss('--red');
+      ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(px, y.getPixelForValue(k.h)); ctx.lineTo(px, y.getPixelForValue(k.l)); ctx.stroke();
+      const yo = y.getPixelForValue(k.o), yc = y.getPixelForValue(k.c);
+      const top = Math.min(yo, yc), hgt = Math.max(1, Math.abs(yc - yo));
+      ctx.fillRect(px - bw / 2, top, bw, hgt);
+    });
+    ctx.restore();
+  }
+};
+
+function _monthKey(d) { return d.slice(0, 7); }
+function _weekKey(d) {
+  const dt = new Date(d), on = new Date(dt.getFullYear(), 0, 1);
+  const wk = Math.ceil(((dt - on) / 86400000 + on.getDay() + 1) / 7);
+  return dt.getFullYear() + '-W' + wk;
+}
+function resampleOHLC(ohlc, tf) {
+  if (tf === 'D') return ohlc.map(b => ({ t: new Date(b.d), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v || 0 }));
+  const keyf = tf === 'W' ? _weekKey : _monthKey;
+  const groups = new Map();
+  ohlc.forEach(b => { const k = keyf(b.d); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(b); });
+  const out = [];
+  groups.forEach(arr => out.push({
+    t: new Date(arr[arr.length - 1].d), o: arr[0].o,
+    h: Math.max.apply(null, arr.map(x => x.h)), l: Math.min.apply(null, arr.map(x => x.l)),
+    c: arr[arr.length - 1].c, v: arr.reduce((a, x) => a + (x.v || 0), 0)
+  }));
+  out.sort((a, b) => a.t - b.t);
+  return out;
+}
+function _fixY(scale) { scale.width = 58; }
+
+function drawPriceArea(s) {
   if (priceChart) priceChart.destroy();
+  if (volChart) volChart.destroy();
+  let ohlc = s.ohlc;
+  if ((!ohlc || !ohlc.length) && s.prices) ohlc = s.prices.map(p => ({ d: p.date, o: p.close, h: p.close, l: p.close, c: p.close, v: 0 }));
+  const cs = resampleOHLC(ohlc || [], curTF);
+  if (cs.length < 2) {
+    const ctx = $('#priceChart').getContext('2d');
+    ctx.clearRect(0, 0, 9999, 9999); ctx.font = '12px sans-serif'; ctx.fillStyle = getCss('--muted');
+    ctx.fillText('株価データがありません(履歴または取得期間外)', 10, 30);
+    return;
+  }
+  const closes = cs.map(k => k.c);
+  const ma5 = __smaSeries(closes, 5), ma25 = __smaSeries(closes, 25), ma75 = __smaSeries(closes, 75);
+  const T = cs.map(k => k.t.getTime());
+  const unit = curTF === 'M' ? 'year' : 'month';
+  const xScale = { type: 'timeseries', min: T[0], max: T[T.length - 1],
+    time: { unit, displayFormats: { month: 'yy/MM', year: 'yyyy' } },
+    ticks: { font: { size: 10 }, maxRotation: 0, maxTicksLimit: 8 }, grid: { color: '#eef0f3' } };
+  let lo = Math.min.apply(null, cs.map(k => k.l)), hi = Math.max.apply(null, cs.map(k => k.h));
+  const pad = (hi - lo) * 0.08 || hi * 0.05;
+  const mkMA = (arr, col, dash) => ({ data: T.map((t, i) => ({ x: t, y: arr[i] })), borderColor: col,
+    borderDash: dash || [], pointRadius: 0, borderWidth: 1.1, spanGaps: true, fill: false, tension: .2 });
+  priceChart = new Chart($('#priceChart'), {
+    type: 'line',
+    data: { datasets: [ mkMA(ma5, '#d97706'), mkMA(ma25, '#2563eb'), mkMA(ma75, '#7c3aed', [4, 3]) ] },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: { x: xScale, y: { min: lo - pad, max: hi + pad, afterFit: _fixY,
+        ticks: { callback: v => '¥' + Math.round(v).toLocaleString(), font: { size: 10 } } } }
+    },
+    plugins: [candlePlugin, buyMarkerPlugin]
+  });
+  priceChart.$candles = cs;
+  priceChart.update();
+  const volData = cs.map(k => ({ x: k.t.getTime(), y: k.v }));
+  const volColors = cs.map(k => (k.c >= k.o ? getCss('--green') : getCss('--red')) + 'cc');
+  const bw = Math.max(1, Math.min(13, 600 / cs.length * 0.62));
+  volChart = new Chart($('#volChart'), {
+    type: 'bar',
+    data: { datasets: [{ data: volData, backgroundColor: volColors, borderWidth: 0, barThickness: bw }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: {
+        x: { type: 'timeseries', min: T[0], max: T[T.length - 1], time: { unit, displayFormats: { month: 'yy/MM', year: 'yyyy' } },
+          ticks: { display: false }, grid: { display: false } },
+        y: { afterFit: _fixY, beginAtZero: true,
+          ticks: { maxTicksLimit: 3, font: { size: 9 },
+            callback: v => v >= 1e6 ? (v / 1e6).toFixed(0) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(0) + 'k' : v } }
+      }
+    }
+  });
+}
+
+function drawQuarterChart(s) {
   if (quarterChart) quarterChart.destroy();
   const dom = sharedDomain(s);
   const xScale = { type: 'time', time: { unit: 'month', displayFormats: { month: 'yy/MM' } },
     ticks: { font: { size: 10 } }, grid: { color: '#eef0f3' } };
   if (dom) { xScale.min = dom.min; xScale.max = dom.max; }
-
-  // 株価
-  const pricePts = (s.prices || []).map(p => ({ x: p.date, y: p.close }));
-  const up = pricePts.length >= 2 ? pricePts[pricePts.length - 1].y >= pricePts[0].y : true;
-  const pc = up ? getCss('--green') : getCss('--red');
-  if (pricePts.length >= 2) {
-    const ys = pricePts.map(p => p.y), lo = Math.min(...ys), hi = Math.max(...ys), pad = (hi - lo) * 0.08 || hi * 0.05;
-    const __c = pricePts.map(p => p.y), __ma25 = __smaSeries(__c, 25), __ma75 = __smaSeries(__c, 75);
-    priceChart = new Chart($('#priceChart'), {
-      type: 'line',
-      data: { datasets: [
-        { data: pricePts, borderColor: pc, backgroundColor: pc + '22',
-          fill: true, pointRadius: 0, borderWidth: 1.6, tension: .25 },
-        { data: pricePts.map((p, i) => ({ x: p.x, y: __ma25[i] })), borderColor: '#d97706',
-          pointRadius: 0, borderWidth: 1, tension: .25, spanGaps: true, fill: false },
-        { data: pricePts.map((p, i) => ({ x: p.x, y: __ma75[i] })), borderColor: '#7c3aed',
-          borderDash: [4, 3], pointRadius: 0, borderWidth: 1, tension: .25, spanGaps: true, fill: false }
-      ] },
-      options: baseOpts(xScale, { min: lo - pad, max: hi + pad,
-        ticks: { callback: v => '¥' + Math.round(v).toLocaleString(), font: { size: 10 } } }),
-      plugins: [buyMarkerPlugin]
-    });
-  } else {
-    const ctx = $('#priceChart').getContext('2d');
-    ctx.font = '12px sans-serif'; ctx.fillStyle = getCss('--muted');
-    ctx.fillText('株価データがありません(履歴または取得期間外)', 10, 30);
-  }
-
-  // 四半期 営業/経常
   const q = s.quarterly || [];
   const opData = q.filter(x => x.periodEnd != null).map(x => ({ x: x.periodEnd, y: toOku(x.op) }));
   const odData = q.filter(x => x.periodEnd != null && x.ord != null).map(x => ({ x: x.periodEnd, y: toOku(x.ord) }));

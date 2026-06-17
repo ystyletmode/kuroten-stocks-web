@@ -117,3 +117,11 @@ footer{padding:12px 18px;color:var(--muted);font-size:11px;border-top:1px solid 
   font-size:13px; line-height:1.5; background:#fff7ed; }
 .regime b{ font-size:14px; }
 .regime.neutral{ color:#5b6370; border-color:#d7dbe0; background:#f6f7f9; }
+
+/* ===== 時間軸切替（ローソク足） ===== */
+.tfbar{ display:flex; gap:6px; margin:2px 0 8px; flex-wrap:wrap; }
+.tfbtn{ font-size:12px; padding:4px 11px; border:1px solid #d7dbe0; background:#fff;
+  border-radius:7px; cursor:pointer; color:#3a4250; line-height:1; }
+.tfbtn:hover{ background:#f4f6f8; }
+.tfbtn.active{ background:#11151c; color:#fff; border-color:#11151c; }
+.tfbtn.ext{ color:#2563eb; }
