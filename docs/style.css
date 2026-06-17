@@ -93,3 +93,27 @@ footer{padding:12px 18px;color:var(--muted);font-size:11px;border-top:1px solid 
 .row .star:hover{color:#e0a93b}
 .detail .head .detailstar{margin-left:auto;align-self:flex-start;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;color:#9aa3ad;white-space:nowrap}
 .detail .head .detailstar.on{background:#fff7e6;border-color:#e0a93b;color:#b8801f}
+
+/* ===== 買い時のポイント（第4章） ===== */
+.tchip{ display:inline-block; font-size:11px; font-weight:700; line-height:1;
+  padding:3px 7px; border-radius:999px; vertical-align:middle; margin-left:6px; white-space:nowrap; }
+.timingbox{ border:1px solid #e6e8ec; border-radius:12px; padding:14px; margin:6px 0 4px;
+  background:#fafbfc; }
+.timingbox .thead{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.timingbox .tbadge{ font-size:18px; font-weight:800; padding:8px 14px; border-radius:10px; white-space:nowrap; }
+.timingbox .tmeta{ font-size:13px; color:#3a4250; line-height:1.7; }
+.timingbox .tmeta b{ font-size:15px; color:#11151c; }
+.tchecks{ margin-top:12px; display:grid; gap:6px; }
+.tcheck{ display:flex; align-items:flex-start; gap:8px; font-size:13px; color:#3a4250; }
+.tcheck .tmark{ font-weight:800; width:14px; flex:none; text-align:center; }
+.tcheck .tnote{ flex:1; }
+.tcheck .tpts{ font-weight:700; font-variant-numeric:tabular-nums; flex:none; }
+.tcheck .tpts.pos{ color:#16a34a; }
+.tcheck .tpts.neg{ color:#c2410c; }
+.timingbox .cap{ margin-top:10px; }
+
+/* ===== 地合いバナー（第6章） ===== */
+.regime{ margin-top:8px; padding:8px 12px; border:1px solid #d97706; border-radius:10px;
+  font-size:13px; line-height:1.5; background:#fff7ed; }
+.regime b{ font-size:14px; }
+.regime.neutral{ color:#5b6370; border-color:#d7dbe0; background:#f6f7f9; }

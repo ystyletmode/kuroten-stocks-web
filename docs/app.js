@@ -28,8 +28,11 @@ function badgeColor(score) {
 function getCss(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
 async function fetchJSON(url) {
-  try { const r = await fetch(url + '?t=' + Date.now()); if (!r.ok) return null; return await r.json(); }
-  catch (e) { return null; }
+  try { const r = await fetch(url + '?t=' + Date.now()); if (r.ok) return await r.json(); }
+  catch (e) {}
+  // file:// プレビュー用フォールバック(埋め込みデータ)
+  if (window.__DATA && window.__DATA[url] !== undefined) return window.__DATA[url];
+  return null;
 }
 
 // ---------- 状態 ----------
@@ -71,11 +74,27 @@ kurotenReload();
 function selectRecord(i) {
   current = records[i];
   if (!current) return;
+  renderRegime(current);
   if (viewMode === 'watchlist') { renderList(); return; }
   $('#summary').textContent = `${current.mode} ・ ${current.summary}`;
   renderList();
   const first = current.results[0];
   selectStock(first ? first.code : null);
+}
+
+function renderRegime(rec) {
+  const el = $('#regimeBanner'); if (!el) return;
+  const r = rec && rec.regime;
+  if (!r) { el.hidden = true; return; }
+  if (!r.label) {
+    el.hidden = false; el.className = 'regime neutral'; el.style.cssText = '';
+    el.textContent = '地合い（第6章）: ' + (r.note || '判定なし');
+    return;
+  }
+  const col = r.label === 'リスクオン' ? '#16a34a' : (r.label === 'リスクオフ' ? '#c2410c' : '#d97706');
+  el.hidden = false; el.className = 'regime';
+  el.style.color = col; el.style.borderColor = col; el.style.background = col + '12';
+  el.innerHTML = `地合い（第6章）: <b>${r.label}</b> — ${esc(r.note)}${r.value != null ? `（${esc(r.index)} ${r.value}）` : ''}`;
 }
 
 function renderList() {
@@ -97,7 +116,7 @@ function renderList() {
       <div class="badge" style="color:${col};background:${col}22;border:2px solid ${col}">
         ${Math.round(s.score)}<small>点</small></div>
       <div class="rowmain">
-        <div class="rowname">${esc(s.name)}</div>
+        <div class="rowname">${esc(s.name)} ${timingChip(s.timing)}</div>
         <div class="rowsub">${s.code}・${esc(s.market)}・${esc(s.sector33 || '')}</div>
       </div>
       <div class="rowprice">
@@ -204,10 +223,14 @@ function selectStock(code) {
       ${s.forecastOP != null ? `<div class="card"><div class="k">通期営業利益予想</div><div class="v" style="font-size:15px">${fmtYen(s.forecastOP)}</div></div>` : ''}
     </div>
 
+    ${timingSection(s)}
+
+    ${irSection(s)}
+
     <div class="chartbox">
       <div class="section-title" style="margin-top:0">株価の推移(日次終値)</div>
       <div style="height:200px"><canvas id="priceChart"></canvas></div>
-      <div class="cap">単位: 円。縦軸は変動が見やすいよう自動調整(0起点ではありません)。</div>
+      <div class="cap">単位: 円。橙=25日移動平均線 / 紫破線=75日移動平均線。縦軸は変動が見やすいよう自動調整(0起点ではありません)。</div>
     </div>
 
     <div class="section-title">購入シミュレーション</div>
@@ -327,10 +350,17 @@ function drawCharts(s) {
   const pc = up ? getCss('--green') : getCss('--red');
   if (pricePts.length >= 2) {
     const ys = pricePts.map(p => p.y), lo = Math.min(...ys), hi = Math.max(...ys), pad = (hi - lo) * 0.08 || hi * 0.05;
+    const __c = pricePts.map(p => p.y), __ma25 = __smaSeries(__c, 25), __ma75 = __smaSeries(__c, 75);
     priceChart = new Chart($('#priceChart'), {
       type: 'line',
-      data: { datasets: [{ data: pricePts, borderColor: pc, backgroundColor: pc + '22',
-        fill: true, pointRadius: 0, borderWidth: 1.6, tension: .25 }] },
+      data: { datasets: [
+        { data: pricePts, borderColor: pc, backgroundColor: pc + '22',
+          fill: true, pointRadius: 0, borderWidth: 1.6, tension: .25 },
+        { data: pricePts.map((p, i) => ({ x: p.x, y: __ma25[i] })), borderColor: '#d97706',
+          pointRadius: 0, borderWidth: 1, tension: .25, spanGaps: true, fill: false },
+        { data: pricePts.map((p, i) => ({ x: p.x, y: __ma75[i] })), borderColor: '#7c3aed',
+          borderDash: [4, 3], pointRadius: 0, borderWidth: 1, tension: .25, spanGaps: true, fill: false }
+      ] },
       options: baseOpts(xScale, { min: lo - pad, max: hi + pad,
         ticks: { callback: v => '¥' + Math.round(v).toLocaleString(), font: { size: 10 } } }),
       plugins: [buyMarkerPlugin]
@@ -385,6 +415,67 @@ function baseOpts(xScale, yScale) {
 }
 
 function esc(s) { return (s ?? '').toString().replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+// ---------- 買い時(第4章)表示ヘルパー ----------
+function __smaSeries(arr, n) {
+  return arr.map((_, i) => i + 1 < n ? null : arr.slice(i + 1 - n, i + 1).reduce((a, b) => a + b, 0) / n);
+}
+function timingMeta(t) {
+  const m = { buy: { t: '◎買い場', c: '#16a34a' }, dip: { t: '○押し目', c: '#0d9488' },
+              watch: { t: '△様子見', c: '#d97706' }, avoid: { t: '×見送り', c: '#9aa3ad' } };
+  return (t && m[t.signal]) ? m[t.signal] : null;
+}
+function timingChip(t) {
+  const m = timingMeta(t); if (!m) return '';
+  return `<span class="tchip" style="color:${m.c};border:1px solid ${m.c};background:${m.c}14">${m.t}</span>`;
+}
+function timingSection(s) {
+  const t = s.timing; if (!t || !t.signal) return '';
+  const m = timingMeta(t) || { t: t.label || '-', c: '#9aa3ad' };
+  const checks = (t.checks || []).map(c => `
+      <div class="tcheck">
+        <span class="tmark" style="color:${c.ok ? '#16a34a' : '#c2410c'}">${c.ok ? '✓' : '·'}</span>
+        <span class="tnote">${esc(c.note)}</span>
+        ${c.pts ? `<span class="tpts ${c.pts >= 0 ? 'pos' : 'neg'}">${c.pts >= 0 ? '+' : ''}${c.pts}</span>` : ''}
+      </div>`).join('');
+  return `
+    <div class="section-title">買い時のポイント（第4章 チャート分析）</div>
+    <div class="timingbox">
+      <div class="thead">
+        <div class="tbadge" style="color:${m.c};background:${m.c}1a;border:2px solid ${m.c}">${t.label || m.t}</div>
+        <div class="tmeta">
+          <div>買い時スコア <b>${t.score}</b>/100</div>
+          ${t.stopLoss != null ? `<div>損切り目安 <b>${yen0(t.stopLoss)}</b>（直近安値/75日線）</div>` : ''}
+          ${t.widthTarget != null ? `<div>値幅観測の上値目安 <b>${yen0(t.widthTarget)}</b>（参考）</div>` : ''}
+        </div>
+      </div>
+      <div class="tchecks">${checks}</div>
+      <div class="cap">第4章メソッド: 移動平均線(5/25/75日)・ゴールデン/デッドクロス・押し目・もみ合い上放れ・出来高・乖離・損切りラインから判定。黒字転換(適合度)とは別の「買い時」の目安です。</div>
+    </div>`;
+}
+
+function irSection(s) {
+  const ir = s.ir; if (!ir) return '';
+  const sigs = ir.signals || [];
+  if (!sigs.length && ir.progress == null) return '';
+  const rows = sigs.map(c => `
+      <div class="tcheck">
+        <span class="tmark" style="color:${c.ok ? '#16a34a' : '#c2410c'}">${c.ok ? '✓' : '!'}</span>
+        <span class="tnote">${esc(c.note)}</span>
+        ${c.pts ? `<span class="tpts ${c.pts >= 0 ? 'pos' : 'neg'}">${c.pts >= 0 ? '+' : ''}${c.pts}</span>` : ''}
+      </div>`).join('');
+  const prog = ir.progress != null ? `<div>進捗率 <b>${ir.progress}%</b></div>` : '';
+  let rev = '';
+  if (ir.upwardRevision === true) rev = `<div>通期予想 <span class="tchip" style="color:#16a34a;border:1px solid #16a34a;background:#16a34a14">上方修正</span></div>`;
+  else if (ir.upwardRevision === false) rev = `<div>通期予想 <span class="tchip" style="color:#c2410c;border:1px solid #c2410c;background:#c2410c14">下方修正</span></div>`;
+  return `
+    <div class="section-title">IRシグナル（第5章 IR情報）</div>
+    <div class="timingbox">
+      ${(prog || rev) ? `<div class="thead"><div class="tmeta">${prog}${rev}</div></div>` : ''}
+      <div class="tchecks">${rows}</div>
+      <div class="cap">第5章メソッド: 通期予想の上方修正・進捗率(目安 1Q25%/2Q50%/3Q75%)・営業CF乖離。地合い(第6章)次第で株価反応は変わります。</div>
+    </div>`;
+}
 
 // ---------- 購入シミュレーション ----------
 const buyMarkerPlugin = {
