@@ -109,15 +109,40 @@ class JQuants:
                 s.add(c[:4] if len(c) == 5 else c)
         return list(s)
 
-    def daily_closes(self, code, frm, to):
+    def daily_bars(self, code, frm, to):
+        """日次の四本値＋出来高(調整後優先)を取得。チャート分析(第4章)用。"""
         rows = self._get_all("/v2/equities/bars/daily",
                              {"code": code, "from": frm, "to": to})
         out = []
         for r in rows:
             d = r.get("Date")
             c = to_f(r.get("AdjC")) or to_f(r.get("C"))
+            if not d or c is None:
+                continue
+            o = to_f(r.get("AdjO")) or to_f(r.get("O")) or c
+            h = to_f(r.get("AdjH")) or to_f(r.get("H")) or c
+            l = to_f(r.get("AdjL")) or to_f(r.get("L")) or c
+            v = to_f(r.get("AdjVo")) or to_f(r.get("Vo")) or 0.0
+            out.append({"date": d, "o": o, "h": h, "l": l, "c": c, "v": v})
+        out.sort(key=lambda x: x["date"])
+        return out
+
+    def daily_closes(self, code, frm, to):
+        return [{"date": b["date"], "close": b["c"]} for b in self.daily_bars(code, frm, to)]
+
+    def index_bars(self, frm, to):
+        """TOPIX指数の日次終値を取得。地合い判定(第6章)用。
+        エンドポイント: /v2/indices/bars/daily/topix (項目: Date,O,H,L,C)。"""
+        try:
+            rows = self._get_all("/v2/indices/bars/daily/topix", {"from": frm, "to": to})
+        except Exception:
+            rows = []
+        out = []
+        for r in rows:
+            d = r.get("Date")
+            c = to_f(r.get("C"))
             if d and c is not None:
-                out.append({"date": d, "close": c})
+                out.append({"date": d, "c": c})
         out.sort(key=lambda x: x["date"])
         return out
 
@@ -157,6 +182,7 @@ def parse_statement(r):
         "op": to_f(r.get("OP")),
         "ord": to_f(r.get("OdP")),
         "fop": to_f(r.get("FOP")),
+        "opcf": to_f(r.get("CFO")),  # 営業CF(通期中心・四半期は空が多い)
     }
 
 
@@ -260,6 +286,368 @@ def score_company(sts, window=6):
     return round(sc, 1), fac, pts, turn, forecast
 
 
+# ----------------------------- メソッド: 買い時(第4章 チャート分析) -----------------------------
+# 馬渕メソッド第4章「売買タイミングを見極めるチャート分析の基本」をアルゴリズム化。
+#  移動平均線(5/25/75日)、ゴールデン/デッドクロス(安値圏で有効)、押し目買い、
+#  もみ合いからの上放れ(出来高増)、移動平均乖離(過熱)、損切りライン(直近安値/75日線割れ)。
+def _sma(a, n):
+    if len(a) < n:
+        return None
+    return sum(a[-n:]) / n
+
+
+def _sma_series(a, n):
+    out = []
+    for i in range(len(a)):
+        if i + 1 < n:
+            out.append(None)
+        else:
+            out.append(sum(a[i + 1 - n:i + 1]) / n)
+    return out
+
+
+def _pivots(highs, lows, w=5):
+    """単純なスイング高値/安値(ピボット)の位置を返す。近接クラスタは統合。"""
+    n = len(highs)
+    rawmin, rawmax = [], []
+    for i in range(w, n - w):
+        if lows[i] == min(lows[i - w:i + w + 1]):
+            rawmin.append(i)
+        if highs[i] == max(highs[i - w:i + w + 1]):
+            rawmax.append(i)
+
+    def collapse(idxs, vals, take_min):
+        out = []
+        for i in idxs:
+            if out and i - out[-1] <= w:
+                if (take_min and vals[i] < vals[out[-1]]) or (not take_min and vals[i] > vals[out[-1]]):
+                    out[-1] = i
+            else:
+                out.append(i)
+        return out
+
+    return collapse(rawmin, lows, True), collapse(rawmax, highs, False)
+
+
+def _detect_patterns(highs, lows, closes):
+    """第4章後半: Wボトム/逆三尊/三尊 を簡易検出。target=値幅観測(測定移動)。"""
+    out = {}
+    n = len(closes)
+    if n < 40:
+        return out
+    look = min(n, 140)
+    h, l, c = highs[-look:], lows[-look:], closes[-look:]
+    mins, maxs = _pivots(h, l, 5)
+    price = c[-1]
+    # Wボトム: 直近2つの谷が同水準＋間の山(ネック)を現値が上抜け
+    if len(mins) >= 2:
+        m1, m2 = mins[-2], mins[-1]
+        lo1, lo2 = l[m1], l[m2]
+        if lo1 > 0 and abs(lo2 - lo1) / lo1 <= 0.06:
+            between = [h[k] for k in maxs if m1 < k < m2]
+            if between:
+                neck = max(between)
+                if price > neck:
+                    out["double_bottom"] = True
+                    out["target"] = neck + (neck - min(lo1, lo2))
+    # 逆三尊: 3つの谷で中央が最安、両端が同水準、ネック超え
+    if len(mins) >= 3:
+        a, b, cc = mins[-3], mins[-2], mins[-1]
+        if l[b] < l[a] and l[b] < l[cc] and abs(l[a] - l[cc]) / max(l[a], 1) <= 0.08:
+            between = [h[k] for k in maxs if a < k < cc]
+            if between:
+                neck = max(between)
+                if price > neck:
+                    out["inverse_hs"] = True
+                    out["target"] = neck + (neck - l[b])
+    # 三尊(天井): 3つの山で中央が最高、ネック割れ
+    if len(maxs) >= 3:
+        a, b, cc = maxs[-3], maxs[-2], maxs[-1]
+        if h[b] > h[a] and h[b] > h[cc] and abs(h[a] - h[cc]) / max(h[a], 1) <= 0.08:
+            between = [l[k] for k in mins if a < k < cc]
+            if between:
+                neck = min(between)
+                if price < neck:
+                    out["head_shoulders"] = True
+    return out
+
+
+def timing_signal(bars):
+    """日次OHLCV配列(昇順)から買い時シグナルを算出。
+    返り値: signal(buy/dip/watch/avoid), label, score(0-100), checks[], ma{}, stopLoss, widthTarget"""
+    res = {"signal": "watch", "label": "△様子見", "score": 0,
+           "checks": [], "ma": {}, "stopLoss": None, "widthTarget": None}
+    if not bars:
+        res["checks"].append({"key": "data", "ok": False, "note": "株価データなし", "pts": 0})
+        return res
+    closes = [b["c"] for b in bars]
+    vols = [b.get("v") or 0 for b in bars]
+    lows = [b.get("l") if b.get("l") is not None else b["c"] for b in bars]
+    highs = [b.get("h") if b.get("h") is not None else b["c"] for b in bars]
+    n = len(closes)
+    if n < 30:
+        res["checks"].append({"key": "data", "ok": False, "note": "株価データ不足で買い時判定不可", "pts": 0})
+        return res
+
+    price = closes[-1]
+    ma5, ma25, ma75 = _sma(closes, 5), _sma(closes, 25), _sma(closes, 75)
+    ma25s, ma75s = _sma_series(closes, 25), _sma_series(closes, 75)
+    res["ma"] = {"ma5": round(ma5, 1) if ma5 else None,
+                 "ma25": round(ma25, 1) if ma25 else None,
+                 "ma75": round(ma75, 1) if ma75 else None}
+    checks = []
+    score = 0
+
+    # トレンド判定: 株価>75日線 かつ 25日線が上向き
+    trend_up = False
+    if ma25 and ma75 and len(ma25s) > 21 and ma25s[-21] is not None:
+        trend_up = (price > ma75) and (ma25s[-1] > ma25s[-21])
+    if trend_up:
+        score += 25
+        checks.append({"key": "trend", "ok": True, "note": "上昇トレンド（株価>75日線・25日線が上向き）", "pts": 25})
+    else:
+        checks.append({"key": "trend", "ok": False, "note": "明確な上昇トレンドではない", "pts": 0})
+
+    # パーフェクトオーダー
+    order = bool(ma5 and ma25 and ma75 and ma5 > ma25 > ma75)
+    if order:
+        score += 15
+        checks.append({"key": "ma_order", "ok": True, "note": "パーフェクトオーダー（5日>25日>75日）", "pts": 15})
+
+    # ゴールデンクロス(25日が75日を上抜け)を直近25日内で検出＋安値圏判定
+    GC_WIN = 25
+    gc = gc_low = False
+    for i in range(max(1, n - GC_WIN), n):
+        a0, a1 = ma25s[i - 1], ma25s[i]
+        b0, b1 = ma75s[i - 1], ma75s[i]
+        if None in (a0, a1, b0, b1):
+            continue
+        if a0 <= b0 and a1 > b1:
+            gc = True
+            if b1 and closes[i] <= b1 * 1.12:   # 安値圏: 75日線+12%以内でクロス
+                gc_low = True
+            break
+    if gc and gc_low:
+        score += 20
+        checks.append({"key": "golden_cross", "ok": True, "note": "安値圏でゴールデンクロス（25日線が75日線を上抜け）", "pts": 20})
+    elif gc:
+        score += 8
+        checks.append({"key": "golden_cross", "ok": True, "note": "ゴールデンクロスあり（高値圏のためダマシ注意）", "pts": 8})
+
+    # デッドクロス(25日が75日を下抜け)を直近25日内で検出
+    dc = False
+    for i in range(max(1, n - GC_WIN), n):
+        a0, a1 = ma25s[i - 1], ma25s[i]
+        b0, b1 = ma75s[i - 1], ma75s[i]
+        if None in (a0, a1, b0, b1):
+            continue
+        if a0 >= b0 and a1 < b1:
+            dc = True
+            break
+    if dc:
+        score -= 15
+        checks.append({"key": "dead_cross", "ok": False, "note": "デッドクロス発生（売り/警戒シグナル）", "pts": -15})
+
+    # 押し目: 上昇トレンド中、株価が25日線付近(-4%〜+3%)まで調整
+    pullback = False
+    if trend_up and ma25:
+        dev25 = (price - ma25) / ma25
+        if -0.04 <= dev25 <= 0.03:
+            pullback = True
+            score += 15
+            checks.append({"key": "pullback", "ok": True, "note": "上昇トレンド中の押し目（25日線に接近）", "pts": 15})
+
+    # もみ合いからの上放れ: 直近25日レンジ高値を出来高増で上抜け
+    breakout = False
+    RANGE_N = 25
+    avgv = _sma(vols, 25) or 0
+    if n > RANGE_N + 2:
+        range_hi = max(highs[-(RANGE_N + 1):-1])
+        vol_ok = (vols[-1] > avgv * 1.2) if avgv else False
+        if price > range_hi and vol_ok:
+            breakout = True
+            score += 20
+            checks.append({"key": "breakout", "ok": True, "note": "もみ合いを出来高増で上放れ", "pts": 20})
+
+    # 出来高比(直近 / 25日平均)
+    vr = (vols[-1] / avgv) if avgv else 0
+    if avgv and vr >= 1.2:
+        score += 10
+        checks.append({"key": "volume", "ok": True, "note": "出来高増（25日平均比 %.1f倍）" % vr, "pts": 10})
+    elif avgv:
+        checks.append({"key": "volume", "ok": False, "note": "出来高は平常（25日平均比 %.1f倍）" % vr, "pts": 0})
+    else:
+        checks.append({"key": "volume", "ok": False, "note": "出来高データなし（デモ等）", "pts": 0})
+
+    # 移動平均乖離(過熱)
+    overheat = False
+    if ma25:
+        dev = (price - ma25) / ma25
+        if dev > 0.15:
+            overheat = True
+            score -= 15
+            checks.append({"key": "overheat", "ok": False, "note": "25日線から+%d%%乖離（過熱・高値掴み注意）" % round(dev * 100), "pts": -15})
+        else:
+            score += 5
+            checks.append({"key": "overheat", "ok": True, "note": "過熱感は限定的", "pts": 5})
+
+    # 損切りライン: 直近20日安値と75日線の高い方
+    recent_low = min(lows[-20:])
+    stop = max(recent_low, ma75) if ma75 else recent_low
+    res["stopLoss"] = round(stop, 1)
+    below_stop = price < stop
+    if below_stop:
+        score -= 20
+        checks.append({"key": "stop", "ok": False, "note": "損切りライン（直近安値/75日線）を下回る", "pts": -20})
+    else:
+        score += 10
+        checks.append({"key": "stop", "ok": True, "note": "損切りライン ¥%d を上回って推移" % int(stop), "pts": 10})
+
+    # パターン認識(Wボトム/逆三尊/三尊)
+    pat = _detect_patterns(highs, lows, closes)
+    pattern_buy = pattern_sell = False
+    if pat.get("double_bottom"):
+        pattern_buy = True; score += 20
+        checks.append({"key": "w_bottom", "ok": True, "note": "Wボトム成立（直近高値=ネックライン超え＝本格的な買いサイン）", "pts": 20})
+        if pat.get("target"):
+            res["widthTarget"] = round(pat["target"], 1)
+    if pat.get("inverse_hs"):
+        pattern_buy = True; score += 20
+        checks.append({"key": "inv_hs", "ok": True, "note": "逆三尊成立（ネックライン超え＝上昇トレンド転換）", "pts": 20})
+        if pat.get("target"):
+            res["widthTarget"] = round(pat["target"], 1)
+    if pat.get("head_shoulders"):
+        pattern_sell = True; score -= 15
+        checks.append({"key": "hs", "ok": False, "note": "三尊（天井のネックライン割れ＝本格的な売りサイン）", "pts": -15})
+
+    # 値幅観測(参考): パターン未検出時は直近120日の値幅を現値に上乗せ
+    if res["widthTarget"] is None:
+        win = min(n, 120)
+        try:
+            sw = max(highs[-win:]) - min(lows[-win:])
+            res["widthTarget"] = round(price + sw, 1)
+        except Exception:
+            pass
+
+    score = max(0, min(100, score))
+    res["score"] = round(score)
+    res["checks"] = checks
+
+    # 総合判定（Wボトム/逆三尊のネック超えは本格的な買いサインとして過熱より上位）
+    if below_stop or dc or pattern_sell:
+        res["signal"], res["label"] = "avoid", "×見送り"
+    elif pattern_buy:
+        res["signal"], res["label"] = "buy", "◎買い場"
+    elif overheat:
+        res["signal"], res["label"] = "watch", "△様子見（過熱）"
+    elif breakout or (gc and gc_low):
+        res["signal"], res["label"] = "buy", "◎買い場"
+    elif pullback:
+        res["signal"], res["label"] = "dip", "○押し目・初動"
+    elif score >= 55 and trend_up:
+        res["signal"], res["label"] = "dip", "○押し目・初動"
+    else:
+        res["signal"], res["label"] = "watch", "△様子見"
+    return res
+
+
+
+# ----------------------------- メソッド: IRシグナル(第5章 IR情報をフル活用) -----------------------------
+# 馬渕メソッド第5章を点数化。
+#  1) 通期営業利益予想(FOP)の「上方修正」検出(開示履歴の比較)
+#  2) 進捗率(達成率) = 累計営業利益 ÷ 通期予想。四半期基準(1Q25%/2Q50%/3Q75%)と比較し上振れ判定
+#  3) 営業利益と営業CFの乖離 = 危険信号(営業CFが取得できた場合のみ)
+QBENCH = {1: 25, 2: 50, 3: 75, 4: 100}
+
+
+def ir_signal(sts):
+    out = {"signals": [], "upwardRevision": None, "progress": None, "cfDivergence": None}
+    if not sts:
+        return out
+    ss = sorted(sts, key=lambda s: s.get("disc", ""))
+
+    # 1) 上方修正: FOPの履歴を時系列で比較し、直近の変化(増額/減額)を検出
+    fops = [s["fop"] for s in ss if s.get("fop") is not None]
+    if len(fops) >= 2:
+        last = fops[-1]
+        prev = None
+        for f in reversed(fops[:-1]):
+            if f != last:
+                prev = f
+                break
+        if prev is not None:
+            if last > prev:
+                out["upwardRevision"] = True
+                out["signals"].append({"key": "revision", "ok": True,
+                    "note": "通期営業利益予想が上方修正（前回予想から増額）", "pts": 20})
+            elif last < prev:
+                out["upwardRevision"] = False
+                out["signals"].append({"key": "revision", "ok": False,
+                    "note": "通期営業利益予想が下方修正（減額）", "pts": -15})
+
+    # 2) 進捗率: 累計OPとFOPを持つ直近開示で算出
+    cand = [s for s in ss if s.get("op") is not None and s.get("fop") not in (None, 0)]
+    if cand:
+        s = cand[-1]
+        q = QNUM.get(s["ptype"], 0)
+        if s["fop"] > 0 and q in QBENCH:
+            prog = s["op"] / s["fop"] * 100
+            out["progress"] = round(prog, 1)
+            bench = QBENCH[q]
+            if prog >= bench:
+                out["signals"].append({"key": "progress", "ok": True,
+                    "note": "進捗率%d%%（%s基準%d%%を上回る＝上振れ期待）" % (round(prog), s["ptype"], bench), "pts": 15})
+            else:
+                out["signals"].append({"key": "progress", "ok": False,
+                    "note": "進捗率%d%%（%s基準%d%%に未達）" % (round(prog), s["ptype"], bench), "pts": 0})
+
+    # 3) 営業利益と営業CFの乖離(取得できた場合のみ)
+    cf = None
+    for s in reversed(ss):
+        if s.get("opcf") is not None and s.get("op") is not None:
+            cf = s
+            break
+    if cf is not None:
+        div = (cf["op"] > 0 and cf["opcf"] < cf["op"] * 0.3)
+        out["cfDivergence"] = div
+        if div:
+            out["signals"].append({"key": "cf", "ok": False,
+                "note": "営業利益に対し営業CFが著しく小さい（利益とCFの乖離＝危険信号）", "pts": -10})
+        else:
+            out["signals"].append({"key": "cf", "ok": True,
+                "note": "営業CFは営業利益に概ね見合う", "pts": 5})
+    return out
+
+
+
+# ----------------------------- メソッド: 相場サイクル/地合い(第6章) -----------------------------
+def market_regime(jq, as_of, frm):
+    """指数(TOPIX)の長期移動平均からリスクオン/オフを判定(第6章)。
+    取得できない場合は label=None として「本番環境で表示」とする。"""
+    try:
+        bars = jq.index_bars(frm, as_of)
+    except Exception as e:
+        print("index err", e, file=sys.stderr)
+        bars = []
+    if not bars or len(bars) < 60:
+        return {"label": None, "index": "TOPIX", "value": None,
+                "note": "指数データ未取得のため地合い判定は本番環境(J-Quants)で表示されます"}
+    closes = [b["c"] for b in bars]
+    last = closes[-1]
+    nlong = 200 if len(closes) >= 200 else 75
+    malong = _sma(closes, nlong)
+    mas = _sma_series(closes, nlong)
+    rising = (len(mas) > 21 and mas[-1] is not None and mas[-21] is not None and mas[-1] > mas[-21])
+    if malong and last > malong and rising:
+        return {"label": "リスクオン", "index": "TOPIX", "value": round(last, 1),
+                "note": "TOPIXが長期線(%d日)の上・上向き（業績相場/緩和局面寄り＝買い場探しに追い風）" % nlong}
+    if malong and last < malong and not rising:
+        return {"label": "リスクオフ", "index": "TOPIX", "value": round(last, 1),
+                "note": "TOPIXが長期線(%d日)の下・下向き（逆相場局面＝新規買いは慎重に）" % nlong}
+    return {"label": "中立", "index": "TOPIX", "value": round(last, 1),
+            "note": "TOPIXは長期線付近でもみ合い（局面の移行期）"}
+
+
 # ----------------------------- 実行パイプライン -----------------------------
 def as_of_date(cfg):
     d = datetime.datetime.now(JST) - datetime.timedelta(days=cfg["dataDelayDays"])
@@ -276,11 +664,14 @@ def build_scored(jq, cfg, info, sts):
     as_of = as_of_date(cfg)
     price_from = date_offset(cfg, 620)
     try:
-        prices = jq.daily_closes(info["code"], price_from, as_of)
+        bars = jq.daily_bars(info["code"], price_from, as_of)
     except Exception as e:
         print("price err", info["code"], e, file=sys.stderr)
-        prices = []
-    price = prices[-1]["close"] if prices else None
+        bars = []
+    prices = [{"date": b["date"], "close": b["c"]} for b in bars]
+    price = bars[-1]["c"] if bars else None
+    timing = timing_signal(bars)
+    ir = ir_signal(sts)
     last_disc = max((s["disc"] for s in sts), default="-")
     return {
         "code": info["code"], "name": info["name"], "market": info["market"],
@@ -290,6 +681,8 @@ def build_scored(jq, cfg, info, sts):
         "minLot": (price * 100 if price else None),
         "forecastOP": forecast, "lastDisclosed": last_disc,
         "prices": prices,
+        "timing": timing,
+        "ir": ir,
     }
 
 
@@ -373,7 +766,7 @@ def apply_filters_sort(cfg, lst):
 
 
 # ----------------------------- 出力・メール -----------------------------
-def write_outputs(cfg, results, ran_at):
+def write_outputs(cfg, results, ran_at, regime=None):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     mode = cfg["scanMode"]
     summary_parts = [f"{len(results)}銘柄", f"スコア{int(cfg['minScore'])}+"]
@@ -390,6 +783,7 @@ def write_outputs(cfg, results, ran_at):
         "mode": mode,
         "summary": " / ".join(summary_parts),
         "results": results,
+        "regime": regime,
     }
     (DATA_DIR / "latest.json").write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
     hist_path = DATA_DIR / "history.json"
@@ -454,7 +848,12 @@ def main():
     jq = JQuants(api_key, cfg["requestsPerMinute"])
     raw = run_recent(jq, cfg) if cfg["scanMode"] == "recentDisclosures" else run_codelist(jq, cfg)
     results = apply_filters_sort(cfg, raw)
-    write_outputs(cfg, results, ran_at)
+    try:
+        regime = market_regime(jq, as_of_date(cfg), date_offset(cfg, 400))
+    except Exception as e:
+        print("regime err", e, file=sys.stderr)
+        regime = None
+    write_outputs(cfg, results, ran_at, regime)
     try:
         send_email(cfg, results, ran_at)
     except Exception as e:
