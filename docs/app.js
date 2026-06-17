@@ -337,7 +337,7 @@ window.kurotenSyncDownload = syncPull;
 // ---------- チャート ----------
 function sharedDomain(s) {
   const dates = [];
-  (s.prices || []).forEach(p => dates.push(new Date(p.date)));
+  pxSeries(s).forEach(p => dates.push(new Date(p.date)));
   (s.quarterly || []).forEach(q => { if (q.periodEnd) dates.push(new Date(q.periodEnd)); });
   if (!dates.length) return null;
   return { min: new Date(Math.min(...dates)), max: new Date(Math.max(...dates)) };
@@ -407,26 +407,46 @@ function resampleOHLC(ohlc, tf) {
 }
 function _fixY(scale) { scale.width = 58; }
 
+function dailyOf(s) {
+  if (s.ohlc && s.ohlc.length) return s.ohlc;
+  if (s.prices && s.prices.length) return s.prices.map(p => ({ d: p.date, o: p.close, h: p.close, l: p.close, c: p.close, v: 0 }));
+  return [];
+}
+function pxSeries(s) { return dailyOf(s).map(b => ({ date: b.d, close: b.c })); }
+function tfCandles(s, tf) {
+  if (tf === 'M') {
+    if (s.ohlcM && s.ohlcM.length) return resampleOHLC(s.ohlcM, 'D'); // 既に月次 → 座標化のみ
+    return resampleOHLC(dailyOf(s), 'M');                            // 後方互換
+  }
+  return resampleOHLC(dailyOf(s), tf === 'W' ? 'W' : 'D');
+}
+const TF_WINDOW = { D: 40, W: 52, M: 60 }; // 日足=8週間 / 週足=1年 / 月足=5年
+
 function drawPriceArea(s) {
   if (priceChart) priceChart.destroy();
   if (volChart) volChart.destroy();
-  let ohlc = s.ohlc;
-  if ((!ohlc || !ohlc.length) && s.prices) ohlc = s.prices.map(p => ({ d: p.date, o: p.close, h: p.close, l: p.close, c: p.close, v: 0 }));
-  const cs = resampleOHLC(ohlc || [], curTF);
-  if (cs.length < 2) {
+  const csFull = tfCandles(s, curTF);
+  if (csFull.length < 2) {
     const ctx = $('#priceChart').getContext('2d');
     ctx.clearRect(0, 0, 9999, 9999); ctx.font = '12px sans-serif'; ctx.fillStyle = getCss('--muted');
     ctx.fillText('株価データがありません(履歴または取得期間外)', 10, 30);
     return;
   }
-  const closes = cs.map(k => k.c);
-  const ma5 = __smaSeries(closes, 5), ma25 = __smaSeries(closes, 25), ma75 = __smaSeries(closes, 75);
+  const closesF = csFull.map(k => k.c);
+  const ma5F = __smaSeries(closesF, 5), ma25F = __smaSeries(closesF, 25), ma75F = __smaSeries(closesF, 75);
+  const N = Math.min(csFull.length, TF_WINDOW[curTF] || csFull.length);
+  const cs = csFull.slice(-N);
+  const ma5 = ma5F.slice(-N), ma25 = ma25F.slice(-N), ma75 = ma75F.slice(-N);
   const T = cs.map(k => k.t.getTime());
-  const unit = curTF === 'M' ? 'year' : 'month';
+  const unit = curTF === 'D' ? 'week' : curTF === 'W' ? 'month' : 'year';
+  const dfmt = { week: 'MM/dd', month: 'yy/MM', year: 'yyyy' };
   const xScale = { type: 'timeseries', min: T[0], max: T[T.length - 1],
-    time: { unit, displayFormats: { month: 'yy/MM', year: 'yyyy' } },
+    time: { unit, displayFormats: dfmt },
     ticks: { font: { size: 10 }, maxRotation: 0, maxTicksLimit: 8 }, grid: { color: '#eef0f3' } };
-  let lo = Math.min.apply(null, cs.map(k => k.l)), hi = Math.max.apply(null, cs.map(k => k.h));
+  const vals = [];
+  cs.forEach(k => { vals.push(k.l, k.h); });
+  [ma5, ma25, ma75].forEach(a => a.forEach(v => { if (v != null) vals.push(v); }));
+  let lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
   const pad = (hi - lo) * 0.08 || hi * 0.05;
   const mkMA = (arr, col, dash) => ({ data: T.map((t, i) => ({ x: t, y: arr[i] })), borderColor: col,
     borderDash: dash || [], pointRadius: 0, borderWidth: 1.1, spanGaps: true, fill: false, tension: .2 });
@@ -445,7 +465,7 @@ function drawPriceArea(s) {
   priceChart.update();
   const volData = cs.map(k => ({ x: k.t.getTime(), y: k.v }));
   const volColors = cs.map(k => (k.c >= k.o ? getCss('--green') : getCss('--red')) + 'cc');
-  const bw = Math.max(1, Math.min(13, 600 / cs.length * 0.62));
+  const bw = Math.max(1, Math.min(16, 600 / cs.length * 0.62));
   volChart = new Chart($('#volChart'), {
     type: 'bar',
     data: { datasets: [{ data: volData, backgroundColor: volColors, borderWidth: 0, barThickness: bw }] },
@@ -453,7 +473,7 @@ function drawPriceArea(s) {
       responsive: true, maintainAspectRatio: false, animation: false,
       plugins: { legend: { display: false }, tooltip: { enabled: false } },
       scales: {
-        x: { type: 'timeseries', min: T[0], max: T[T.length - 1], time: { unit, displayFormats: { month: 'yy/MM', year: 'yyyy' } },
+        x: { type: 'timeseries', min: T[0], max: T[T.length - 1], time: { unit, displayFormats: dfmt },
           ticks: { display: false }, grid: { display: false } },
         y: { afterFit: _fixY, beginAtZero: true,
           ticks: { maxTicksLimit: 3, font: { size: 9 },
@@ -603,7 +623,7 @@ function closeOnOrAfter(prices, dateStr) {
 function renderSimSetup(s) {
   const dateEl = $('#simDate'), shEl = $('#simShares');
   if (!dateEl || !shEl) return;
-  const prices = s.prices || [];
+  const prices = pxSeries(s);
   if (!prices.length) {
     simMarkerDate = null;
     $('#simResult').innerHTML = '<div class="cap">株価データがないためシミュレーションできません。</div>';
@@ -631,7 +651,7 @@ function renderSimSetup(s) {
 
 function renderSim(s) {
   const out = $('#simResult'); if (!out) return;
-  const prices = s.prices || [];
+  const prices = pxSeries(s);
   const dateEl = $('#simDate'), shEl = $('#simShares'), lotEl = $('#simLot');
   let shares = Math.floor((parseInt(shEl.value, 10) || 0) / 100) * 100;
   if (shares < 100) shares = 100;
