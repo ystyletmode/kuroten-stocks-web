@@ -669,6 +669,7 @@ def build_scored(jq, cfg, info, sts):
         print("price err", info["code"], e, file=sys.stderr)
         bars = []
     prices = [{"date": b["date"], "close": b["c"]} for b in bars]
+    ohlc = [{"d": b["date"], "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"], "v": b["v"]} for b in bars]
     price = bars[-1]["c"] if bars else None
     timing = timing_signal(bars)
     ir = ir_signal(sts)
@@ -681,6 +682,7 @@ def build_scored(jq, cfg, info, sts):
         "minLot": (price * 100 if price else None),
         "forecastOP": forecast, "lastDisclosed": last_disc,
         "prices": prices,
+        "ohlc": ohlc,
         "timing": timing,
         "ir": ir,
     }
@@ -795,7 +797,7 @@ def write_outputs(cfg, results, ran_at, regime=None):
             history = []
     # 履歴は軽量化のため株価系列を省く
     light = dict(record)
-    light["results"] = [{k: v for k, v in r.items() if k != "prices"} for r in results]
+    light["results"] = [{k: v for k, v in r.items() if k not in ("prices", "ohlc")} for r in results]
     history.insert(0, light)
     history = history[:30]
     hist_path.write_text(json.dumps(history, ensure_ascii=False), encoding="utf-8")
