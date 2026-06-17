@@ -648,6 +648,25 @@ def market_regime(jq, as_of, frm):
             "note": "TOPIXは長期線付近でもみ合い（局面の移行期）"}
 
 
+def monthly_ohlc(daily):
+    """日次OHLCV(キー d,o,h,l,c,v)を月次に集計。"""
+    groups = {}
+    order = []
+    for b in daily:
+        k = b["d"][:7]
+        if k not in groups:
+            groups[k] = []
+            order.append(k)
+        groups[k].append(b)
+    out = []
+    for k in order:
+        arr = groups[k]
+        out.append({"d": arr[-1]["d"], "o": arr[0]["o"],
+                    "h": max(x["h"] for x in arr), "l": min(x["l"] for x in arr),
+                    "c": arr[-1]["c"], "v": sum((x["v"] or 0) for x in arr)})
+    return out
+
+
 # ----------------------------- 実行パイプライン -----------------------------
 def as_of_date(cfg):
     d = datetime.datetime.now(JST) - datetime.timedelta(days=cfg["dataDelayDays"])
@@ -662,14 +681,15 @@ def date_offset(cfg, days_before):
 def build_scored(jq, cfg, info, sts):
     sc, fac, pts, turn, forecast = score_company(sts)
     as_of = as_of_date(cfg)
-    price_from = date_offset(cfg, 620)
+    price_from = date_offset(cfg, 1850)  # 月足5年表示のため約5年ぶん取得
     try:
         bars = jq.daily_bars(info["code"], price_from, as_of)
     except Exception as e:
         print("price err", info["code"], e, file=sys.stderr)
         bars = []
-    prices = [{"date": b["date"], "close": b["c"]} for b in bars]
-    ohlc = [{"d": b["date"], "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"], "v": b["v"]} for b in bars]
+    daily = [{"d": b["date"], "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"], "v": b["v"]} for b in bars]
+    ohlc = daily[-300:]            # 日足/週足表示用(直近約14か月)
+    ohlcM = monthly_ohlc(daily)    # 月足表示用(5年・月次集計)
     price = bars[-1]["c"] if bars else None
     timing = timing_signal(bars)
     ir = ir_signal(sts)
@@ -681,8 +701,8 @@ def build_scored(jq, cfg, info, sts):
         "price": price, "target": (price * 2 if price else None),
         "minLot": (price * 100 if price else None),
         "forecastOP": forecast, "lastDisclosed": last_disc,
-        "prices": prices,
         "ohlc": ohlc,
+        "ohlcM": ohlcM,
         "timing": timing,
         "ir": ir,
     }
@@ -797,7 +817,7 @@ def write_outputs(cfg, results, ran_at, regime=None):
             history = []
     # 履歴は軽量化のため株価系列を省く
     light = dict(record)
-    light["results"] = [{k: v for k, v in r.items() if k not in ("prices", "ohlc")} for r in results]
+    light["results"] = [{k: v for k, v in r.items() if k not in ("prices", "ohlc", "ohlcM")} for r in results]
     history.insert(0, light)
     history = history[:30]
     hist_path.write_text(json.dumps(history, ensure_ascii=False), encoding="utf-8")
