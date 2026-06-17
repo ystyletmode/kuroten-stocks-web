@@ -681,12 +681,18 @@ def date_offset(cfg, days_before):
 def build_scored(jq, cfg, info, sts):
     sc, fac, pts, turn, forecast = score_company(sts)
     as_of = as_of_date(cfg)
-    price_from = date_offset(cfg, 1850)  # 月足5年表示のため約5年ぶん取得
+    price_from = date_offset(cfg, 1780)  # 月足5年表示用(Light保持5年以内に収める)
     try:
         bars = jq.daily_bars(info["code"], price_from, as_of)
     except Exception as e:
         print("price err", info["code"], e, file=sys.stderr)
         bars = []
+    if not bars:  # 5年範囲が取得不可(保持期間/範囲制限)の場合は2年に縮めて再取得
+        try:
+            bars = jq.daily_bars(info["code"], date_offset(cfg, 730), as_of)
+        except Exception as e:
+            print("price retry err", info["code"], e, file=sys.stderr)
+            bars = []
     daily = [{"d": b["date"], "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"], "v": b["v"]} for b in bars]
     ohlc = daily[-300:]            # 日足/週足表示用(直近約14か月)
     ohlcM = monthly_ohlc(daily)    # 月足表示用(5年・月次集計)
