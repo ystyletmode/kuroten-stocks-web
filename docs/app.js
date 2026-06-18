@@ -155,8 +155,13 @@ function updateWatchCount() {
   const n = Object.keys(watchlist).length;
   el.textContent = n ? ' (' + n + ')' : '';
 }
+function freshPool() {
+  const r = (records[0] && records[0].results) || [];
+  const w = (records[0] && records[0].watch) || [];
+  return r.concat(w);
+}
 function snapshotOf(code) {
-  const fromLatest = ((records[0] && records[0].results) || []).find(x => x.code === code);
+  const fromLatest = freshPool().find(x => x.code === code);
   const fromCurrent = ((current && current.results) || []).find(x => x.code === code);
   return fromLatest || fromCurrent || null;
 }
@@ -175,12 +180,12 @@ function toggleWatch(code) {
   selectStock(sel);
 }
 function refreshWatchlistFromLatest() {
-  const latest = (records[0] && records[0].results) || [];
+  const latest = freshPool();
   let changed = false;
   latest.forEach(s => {
     if (watchlist[s.code]) {
       const addedAt = watchlist[s.code].addedAt;
-      watchlist[s.code] = Object.assign({}, s, { addedAt });
+      watchlist[s.code] = Object.assign(lightSnap(s), { addedAt });
       changed = true;
     }
   });
@@ -211,7 +216,7 @@ function selectStock(code) {
   renderList();
   let s = activeResults().find((x) => x.code === code);
   if (s && !(s.ohlc && s.ohlc.length)) {                 // 軽量スナップショットは最新データで補完(チャート用)
-    const full = ((records[0] && records[0].results) || []).find(x => x.code === code);
+    const full = freshPool().find(x => x.code === code);
     if (full) s = Object.assign({}, full, { addedAt: s.addedAt });
   }
   const detail = $('#detail'), empty = $('#detailEmpty');
