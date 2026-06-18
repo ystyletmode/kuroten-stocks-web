@@ -741,3 +741,61 @@ renderSimSetup = function (s) {
   shEl.oninput = () => renderSim(s);
   renderSim(s);
 };
+
+
+// ---------- 購入日のクラウド同期(ウォッチリストと同じjsonbinに保存) ----------
+// 同期の保存形式を { watchlist, simDates } に拡張。旧フラット形式も読み込み可。
+syncPush = async function () {
+  const key = syncKeyVal(); let bin = syncBinVal();
+  if (!key) { setSyncStatus('APIキーを入力してください', false); return false; }
+  setSyncStatus('クラウドへ保存中…');
+  try {
+    const payload = JSON.stringify({ watchlist: lightWatchlist(), simDates: loadSimDates() });
+    let r;
+    if (bin) {
+      r = await fetch(JSONBIN + '/' + bin, { method: 'PUT', headers: { 'X-Master-Key': key, 'Content-Type': 'application/json' }, body: payload });
+    } else {
+      r = await fetch(JSONBIN, { method: 'POST', headers: { 'X-Master-Key': key, 'Content-Type': 'application/json', 'X-Bin-Private': 'true', 'X-Bin-Name': 'kuroten-watchlist' }, body: payload });
+    }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    if (!bin && data && data.metadata && data.metadata.id) {
+      bin = data.metadata.id;
+      localStorage.setItem('sync.bin', bin);
+      const f = $('#cfgSyncBin'); if (f) f.value = bin;
+    }
+    setSyncStatus('クラウドへ保存しました' + (bin ? ' (Bin ID: ' + bin + ')' : ''), true);
+    return true;
+  } catch (e) { setSyncStatus('保存失敗: ' + e.message, false); return false; }
+};
+
+syncPull = async function () {
+  const key = syncKeyVal(), bin = syncBinVal();
+  if (!key || !bin) { setSyncStatus('APIキーとBin IDを入力してください', false); return false; }
+  setSyncStatus('クラウドから読み込み中…');
+  try {
+    const r = await fetch(JSONBIN + '/' + bin + '/latest', { headers: { 'X-Master-Key': key, 'X-Bin-Meta': 'false' } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    let obj = (data && data.record) ? data.record : data;
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+      let wl, sd = null;
+      if (obj.watchlist && typeof obj.watchlist === 'object') { wl = obj.watchlist; sd = obj.simDates || null; }
+      else { wl = obj; }
+      watchlist = wl;
+      try { localStorage.setItem(WATCH_KEY, JSON.stringify(lightWatchlist())); } catch (e) {}
+      if (sd && typeof sd === 'object') { try { localStorage.setItem(SIM_DATE_KEY, JSON.stringify(sd)); } catch (e) {} }
+      updateWatchCount(); renderList();
+      if (selectedCode) selectStock(selectedCode);
+    }
+    setSyncStatus('クラウドから読み込みました', true);
+    return true;
+  } catch (e) { setSyncStatus('読み込み失敗: ' + e.message, false); return false; }
+};
+
+// 購入日を変更したらクラウドへも反映(設定済みの場合のみ)
+saveSimDate = function (code, date) {
+  if (!code) return;
+  try { const m = loadSimDates(); if (date) m[code] = date; else delete m[code]; localStorage.setItem(SIM_DATE_KEY, JSON.stringify(m)); } catch (e) {}
+  try { syncPushDebounced(); } catch (e) {}
+};
