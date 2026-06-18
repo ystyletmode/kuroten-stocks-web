@@ -667,6 +667,61 @@ def monthly_ohlc(daily):
     return out
 
 
+# ----------------------------- ウォッチリスト(jsonbin)取得 -----------------------------
+def fetch_watch_codes():
+    """jsonbin からウォッチリストを読み、銘柄コード一覧を返す。
+    Secrets: JSONBIN_KEY (X-Master-Key) / JSONBIN_BIN (Bin ID)。未設定なら空。"""
+    key = os.environ.get("JSONBIN_KEY", "").strip()
+    bin_id = os.environ.get("JSONBIN_BIN", "").strip()
+    if not (key and bin_id):
+        return []
+    url = "https://api.jsonbin.io/v3/b/%s/latest" % bin_id
+    req = urllib.request.Request(url, headers={"X-Master-Key": key, "X-Bin-Meta": "false"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            obj = json.loads(r.read().decode("utf-8"))
+    except Exception as e:
+        print("watchlist取得失敗:", e, file=sys.stderr)
+        return []
+    if isinstance(obj, dict) and isinstance(obj.get("record"), dict):
+        obj = obj["record"]
+    if not isinstance(obj, dict):
+        return []
+    codes = []
+    for k in obj.keys():
+        c = str(k).strip()
+        if c:
+            codes.append(c[:4] if len(c) == 5 else c)
+    return codes
+
+
+def build_watch(jq, cfg, results):
+    """ウォッチ銘柄の最新データ(現在値含む)を取得。ランキング(results)にあれば再利用。"""
+    codes = fetch_watch_codes()
+    if not codes:
+        return []
+    as_of = as_of_date(cfg)
+    by = {r["code"]: r for r in results}
+    out, seen = [], set()
+    for code in codes:
+        code = str(code).strip()
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        if code in by:
+            out.append(by[code])
+            continue
+        try:
+            info = (jq.master(code=code, as_of=as_of) or {}).get(code) or {
+                "code": code, "name": code, "market": "その他", "sector17": "-", "sector33": "-"}
+            sts = [parse_statement(r) for r in jq.statements(code)]
+            sts = [s for s in sts if s]
+            out.append(build_scored(jq, cfg, info, sts))
+        except Exception as e:
+            print("watch err", code, e, file=sys.stderr)
+    return out
+
+
 # ----------------------------- 実行パイプライン -----------------------------
 def as_of_date(cfg):
     d = datetime.datetime.now(JST) - datetime.timedelta(days=cfg["dataDelayDays"])
@@ -794,7 +849,7 @@ def apply_filters_sort(cfg, lst):
 
 
 # ----------------------------- 出力・メール -----------------------------
-def write_outputs(cfg, results, ran_at, regime=None):
+def write_outputs(cfg, results, ran_at, regime=None, watch=None):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     mode = cfg["scanMode"]
     summary_parts = [f"{len(results)}銘柄", f"スコア{int(cfg['minScore'])}+"]
@@ -812,6 +867,7 @@ def write_outputs(cfg, results, ran_at, regime=None):
         "summary": " / ".join(summary_parts),
         "results": results,
         "regime": regime,
+        "watch": watch or [],
     }
     (DATA_DIR / "latest.json").write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
     hist_path = DATA_DIR / "history.json"
@@ -823,6 +879,7 @@ def write_outputs(cfg, results, ran_at, regime=None):
             history = []
     # 履歴は軽量化のため株価系列を省く
     light = dict(record)
+    light.pop("watch", None)  # 履歴にはウォッチ枠を含めない
     light["results"] = [{k: v for k, v in r.items() if k not in ("prices", "ohlc", "ohlcM")} for r in results]
     history.insert(0, light)
     history = history[:30]
@@ -881,7 +938,12 @@ def main():
     except Exception as e:
         print("regime err", e, file=sys.stderr)
         regime = None
-    write_outputs(cfg, results, ran_at, regime)
+    try:
+        watch = build_watch(jq, cfg, results)
+    except Exception as e:
+        print("watch build err", e, file=sys.stderr)
+        watch = []
+    write_outputs(cfg, results, ran_at, regime, watch)
     try:
         send_email(cfg, results, ran_at)
     except Exception as e:
