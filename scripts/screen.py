@@ -688,10 +688,12 @@ def fetch_watch_codes():
     if not isinstance(obj, dict):
         return []
     codes = []
-    for k in obj.keys():
+    src = obj.get("watchlist") if isinstance(obj.get("watchlist"), dict) else obj
+    for k in src.keys():
         c = str(k).strip()
         if c:
-            codes.append(c[:4] if len(c) == 5 else c)
+            if c[0:1].isdigit():
+                codes.append(c[:4] if len(c) == 5 else c)
     return codes
 
 
