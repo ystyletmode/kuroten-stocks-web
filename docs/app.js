@@ -701,3 +701,43 @@ function renderSim(s) {
     ${tgtPl != null ? `<div class="card"><div class="k">2倍利確時の損益(参考)</div><div class="v" style="color:var(--green)">${signYen(tgtPl)}</div></div>` : ''}
   `;
 }
+
+
+// ---------- 購入日の保持(手動変更した購入日を銘柄ごとにキープ) ----------
+const SIM_DATE_KEY = 'kuroten.simDates';
+function loadSimDates() { try { return JSON.parse(localStorage.getItem(SIM_DATE_KEY) || '{}') || {}; } catch (e) { return {}; } }
+function getSimDate(code) { const m = loadSimDates(); return code ? (m[code] || null) : null; }
+function saveSimDate(code, date) {
+  if (!code) return;
+  try { const m = loadSimDates(); if (date) m[code] = date; else delete m[code]; localStorage.setItem(SIM_DATE_KEY, JSON.stringify(m)); } catch (e) {}
+}
+// 既定の購入日(決算開示日の翌営業日)ロジックは維持しつつ、
+// ユーザーが手動で変更した購入日があればそれを優先する版で renderSimSetup を上書き。
+renderSimSetup = function (s) {
+  const dateEl = $('#simDate'), shEl = $('#simShares');
+  if (!dateEl || !shEl) return;
+  const prices = pxSeries(s);
+  if (!prices.length) {
+    simMarkerDate = null;
+    $('#simResult').innerHTML = '<div class="cap">株価データがないためシミュレーションできません。</div>';
+    $('#simLot').textContent = '';
+    return;
+  }
+  const minD = prices[0].date, maxD = prices[prices.length - 1].date;
+  let defD = minD;
+  if (s.lastDisclosed) {
+    const ld = s.lastDisclosed;
+    const after = prices.find(p => p.date > ld);
+    if (after) defD = after.date;
+    else { const oa = closeOnOrAfter(prices, ld); if (oa) defD = oa.date; }
+    if (defD < minD) defD = minD;
+    if (defD > maxD) defD = maxD;
+  }
+  dateEl.min = minD; dateEl.max = maxD;
+  const savedD = getSimDate(s.code);
+  dateEl.value = (savedD && savedD >= minD && savedD <= maxD) ? savedD : defD;
+  if (!shEl.value || +shEl.value < 100) shEl.value = 100;
+  dateEl.oninput = () => { saveSimDate(s.code, dateEl.value); renderSim(s); };
+  shEl.oninput = () => renderSim(s);
+  renderSim(s);
+};
