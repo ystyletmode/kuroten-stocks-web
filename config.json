@@ -1,13 +1,11 @@
 {
-  "scanMode": "recentDisclosures",
+  "scanMode": "codeList",
   "codeList": [
-    "6758",
-    "7203",
-    "9984",
-    "4385",
-    "3038"
+    "6902",
+    "7270",
+    "1489"
   ],
-  "minScore": 80,
+  "minScore": 0,
   "market": null,
   "fiscalMonth": null,
   "themeKeyword": "",
@@ -16,7 +14,7 @@
   "requestsPerMinute": 60,
   "dataDelayDays": 0,
   "lookbackDays": 60,
-  "maxCandidates": 500,
+  "maxCandidates": 60,
   "email": {
     "enabled": true,
     "from": "ystyletmode@gmail.com",
