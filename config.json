@@ -5,17 +5,7 @@
     "7270",
     "1489"
   ],
-  "watchCodes": [
-    "1489",
-    "3480",
-    "4378",
-    "4707",
-    "6902",
-    "7270",
-    "7590",
-    "7674"
-  ],
-  "minScore": 0,
+  "minScore": 80,
   "market": null,
   "fiscalMonth": null,
   "themeKeyword": "",
@@ -24,7 +14,7 @@
   "requestsPerMinute": 60,
   "dataDelayDays": 0,
   "lookbackDays": 60,
-  "maxCandidates": 60,
+  "maxCandidates": 500,
   "email": {
     "enabled": true,
     "from": "ystyletmode@gmail.com",
