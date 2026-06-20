@@ -699,7 +699,7 @@ def fetch_watch_codes():
 
 def build_watch(jq, cfg, results):
     """ウォッチ銘柄の最新データ(現在値含む)を取得。ランキング(results)にあれば再利用。"""
-    codes = fetch_watch_codes()
+    codes = list(fetch_watch_codes()) + [str(c).strip() for c in (cfg.get("watchCodes") or [])]
     if not codes:
         return []
     as_of = as_of_date(cfg)
