@@ -78,6 +78,7 @@
     return {
       scanMode: g('cfgScanMode').value,
       codeList: codes,
+      watchCodes: Object.keys(JSON.parse(localStorage.getItem('kuroten.watchlist') || '{}')),
       minScore: num(g('cfgMinScore').value, 40),
       market: g('cfgMarket').value || null,
       fiscalMonth: g('cfgFiscal').value ? parseInt(g('cfgFiscal').value, 10) : null,
