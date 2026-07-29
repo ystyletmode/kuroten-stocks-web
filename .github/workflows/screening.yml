@@ -1,8 +1,8 @@
 name: スクリーニング自動実行
 
 on:
-  # GitHub内蔵cronで毎日実行(UTC指定)。06:35 UTC = 15:35 JST。
-  # GitHubのcronは混雑時に数十分遅延することがあります。
+  # GitHub内蔵cronで毎日実行。cron はUTC基準(JSTから9時間引いた値)。
+  # 実行時刻は設定画面から変更できます。混雑時は数十分遅延することがあります。
   schedule:
     - cron: '35 6 * * *'
   # 外部(cron-job.org)や手動からの起動も引き続き可能
