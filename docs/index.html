@@ -57,15 +57,13 @@
       <div class="grp-title">自動実行(スケジュール)</div>
       <div class="frow"><label>毎日の実行時刻(JST)</label>
         <span><select id="cfgAutoHour"></select> 時 <select id="cfgAutoMin"></select> 分</span></div>
-      <div class="frow"><label>cron-job.org APIキー</label>
-        <input id="cfgCronApiKey" type="password" placeholder="cron-job.org の APIキー"></div>
       <div class="frow">
         <button id="btnLoadCron" class="btn">現在の時刻を読み込み</button>
         <button id="btnSaveCron" class="btn primary">実行時刻を保存</button>
         <span id="cronStatus" class="cfgstatus"></span>
       </div>
-      <div class="hint">実行時刻は cron-job.org のスケジュールを更新します(時刻は正確に起動)。cron-job.org の「Settings」でAPIキーを発行して入力してください(このブラウザ内にのみ保存)。対象は URL に <code>screening.yml/dispatches</code> を含むジョブを自動で探します。APIキーにIPアドレス制限を設定していると失敗します。
-        <a href="https://console.cron-job.org" target="_blank">コンソールを開く</a></div>
+      <div class="hint">実行時刻は GitHub Actions のワークフロー(<code>.github/workflows/screening.yml</code>)の <code>schedule</code> を直接書き換えます。上の個人アクセストークンに <b>Workflows: Read and write</b> 権限が必要です。GitHubのcronはUTC基準のため内部でJSTから変換します。<b>混雑時は指定時刻から数十分遅れて起動することがあります</b>(時刻厳守はできません)。
+        <a href="https://github.com/ystyletmode/kuroten-stocks-web/actions" target="_blank">実行履歴を開く</a></div>
     </div>
 
     <div class="grp">
