@@ -1,7 +1,11 @@
 name: スクリーニング自動実行
 
 on:
-  # スケジュールは外部(cron-job.org)から workflow_dispatch で起動するため、GitHub内蔵cronは無効化
+  # GitHub内蔵cronで毎日実行(UTC指定)。06:35 UTC = 15:35 JST。
+  # GitHubのcronは混雑時に数十分遅延することがあります。
+  schedule:
+    - cron: '35 6 * * *'
+  # 外部(cron-job.org)や手動からの起動も引き続き可能
   workflow_dispatch: {}
 
 permissions:
