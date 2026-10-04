@@ -7,11 +7,14 @@
   ],
   "watchCodes": [
     "1489",
+    "2656",
+    "2962",
     "3480",
     "4378",
     "4707",
     "6902",
     "7270",
+    "7462",
     "7590",
     "7674"
   ],
@@ -21,12 +24,12 @@
   "themeKeyword": "",
   "budgetYen": 200000,
   "applyBudgetFilter": false,
-  "requestsPerMinute": 60,
+  "requestsPerMinute": 5,
   "dataDelayDays": 0,
   "lookbackDays": 60,
   "maxCandidates": 500,
   "email": {
-    "enabled": true,
+    "enabled": false,
     "from": "ystyletmode@gmail.com",
     "to": "tmnr4@icloud.com"
   }
